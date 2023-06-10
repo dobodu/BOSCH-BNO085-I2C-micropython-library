@@ -12,12 +12,10 @@ print(i2c0.scan())
 
 bno = BNO08X_I2C(i2c0, debug=True)
 
-print("Enabling features")
-
 bno.enable_feature(BNO_REPORT_ACCELEROMETER)
 """bno.enable_feature(BNO_REPORT_GYROSCOPE)
 bno.enable_feature(BNO_REPORT_MAGNETOMETER)
-bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)"""
 
 while True:
     time.sleep(0.5)
@@ -26,7 +24,7 @@ while True:
     print("X: %0.6f  Y: %0.6f Z: %0.6f  m/s^2" % (accel_x, accel_y, accel_z))
     print("")
 
-    print("Gyro:")
+    """print("Gyro:")
     gyro_x, gyro_y, gyro_z = bno.gyro  # pylint:disable=no-member
     print("X: %0.6f  Y: %0.6f Z: %0.6f rads/s" % (gyro_x, gyro_y, gyro_z))
     print("")
