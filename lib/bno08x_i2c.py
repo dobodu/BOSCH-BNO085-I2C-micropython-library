@@ -22,8 +22,6 @@ class BNO08X_I2C(BNO08X):
         super().__init__(reset, debug)
 
     def _send_packet(self, channel, data):
-        #self._dbg("BNO08X_I2C SENDING PACKET...")
-        #self._dbg("BNO08X_I2C SENDING Channel : ", channel, " Data : ", data)
         data_length = len(data)
         write_length = data_length + 4
 
@@ -46,7 +44,7 @@ class BNO08X_I2C(BNO08X):
     # the sensor will always tell us how much there is, so no need to track it ourselves
 
     def _read_header(self):
-        self._dbg("BNO08X_I2C READ HEADER...")
+        self._dbg("BNO08X_I2C READ HEADER :")
         self._dbg("")
         #Reads the first 4 bytes available as a header ==> Expecting a header
         self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[0:4])
@@ -56,7 +54,7 @@ class BNO08X_I2C(BNO08X):
         return packet_header
 
     def _read_packet(self):
-        self._dbg("BNO08X_I2C READ PACKET...")
+        self._dbg("BNO08X_I2C READ PACKET :")
         self._dbg("")
         #Read a packet
         #Begin with reading a header ==> Expecting a header 
