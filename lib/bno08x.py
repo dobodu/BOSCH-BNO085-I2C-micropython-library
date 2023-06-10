@@ -378,7 +378,7 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[1] in reports
             ):
-                outstr += "DBG::\t\t\t\tEnabled Feature: %s(%s)\n" % (
+                outstr += "DBG::\t\t\t\t Enabled Feature: %s(%s)\n" % (
                     reports[self.data[1]],
                     hex(self.data[5]),
                 )
