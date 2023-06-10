@@ -65,7 +65,7 @@ BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR = const(0x2A)
 
 _DEFAULT_REPORT_INTERVAL = const(50000)  # in microseconds = 50ms
 _QUAT_READ_TIMEOUT = 500  # timeout in ms
-_PACKET_READ_TIMEOUT = 5000 
+_PACKET_READ_TIMEOUT = 2000 
 _FEATURE_ENABLE_TIMEOUT = 2000
 _DEFAULT_TIMEOUT = 2000
 _BNO08X_CMD_RESET = const(0x01)
@@ -344,8 +344,8 @@ class Packet:
     def __str__(self):
         length = self.header.packet_byte_count
         outstr = "DBG::\nDBG::\t\t\t HEADER:\n"
-        outstr += "DBG::\t\t\t\t Data Len: %d\n" % (self.header.data_length)
-        outstr += "DBG::\t\t\t\t Channel: %s (%d)\n" % (
+        outstr += "DBG::\t\t\t\tData Len: %d\n" % (self.header.data_length)
+        outstr += "DBG::\t\t\t\tChannel: %s (%d)\n" % (
             channels[self.channel_number],
             self.channel_number,
         )
@@ -354,12 +354,12 @@ class Packet:
             _BNO_CHANNEL_INPUT_SENSOR_REPORTS,
         ]:
             if self.report_id in reports:
-                outstr += "DBG::\t\t\t\t Report Type: %s (0x%x)\n" % (
+                outstr += "DBG::\t\t\t\tReport Type: %s (0x%x)\n" % (
                     reports[self.report_id],
                     self.report_id,
                 )
             else:
-                outstr += "DBG::\t\t\t\t** UNKNOWN Report Type **: %s\n" % hex(
+                outstr += "DBG::\t\t\t\t**UNKNOWN Report Type **: %s\n" % hex(
                     self.report_id
                 )
 
@@ -378,11 +378,11 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[1] in reports
             ):
-                outstr += "DBG::\t\t\t\t Enabled Feature: %s(%s)\n" % (
+                outstr += "DBG::\t\t\t\tEnabled Feature: %s(%s)\n" % (
                     reports[self.data[1]],
                     hex(self.data[5]),
                 )
-        outstr += "DBG::\t\t\t\t Sequence number: %s\n" % self.header.sequence_number
+        outstr += "DBG::\t\t\t\tSequence number: %s\n" % self.header.sequence_number
         outstr += "DBG::\t\t\t DATA:"
 
         for idx, packet_byte in enumerate(self.data[:length]):
@@ -465,7 +465,6 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     def initialize(self):
         """Initialize the sensor"""
-        self._dbg("BNO08X : HARD RESETTING")
         for _ in range(3):
             self.hard_reset()
             self.soft_reset()
@@ -811,6 +810,8 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             raise error
 
     def _handle_control_report(self, report_id, report_bytes):
+        self._dbg("BNO08X CONTROL REPORT = ",reports[report_id])
+        self._dbg("")
         if report_id == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
             (sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number) = parse_sensor_id(report_bytes)
             self._dbg("\tFROM PACKET SLICE:")
@@ -822,9 +823,14 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         if report_id == _GET_FEATURE_RESPONSE:
             get_feature_report = _parse_get_feature_response_report(report_bytes)
             _report_id, feature_report_id, *_remainder = get_feature_report
+            self._dbg("\t Report Id ",_report_id)
+            self._dbg("\t Feature Report Id ",feature_report_id)
             self._readings[feature_report_id] = _INITIAL_REPORTS.get(
                 feature_report_id, (0.0, 0.0, 0.0)
             )
+            self._dbg("\t Readings ",self._readings)
+            self._dbg("")
+            
         if report_id == _COMMAND_RESPONSE:
             self._handle_command_response(report_bytes)
 
@@ -853,9 +859,13 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     def _process_report(self, report_id, report_bytes):
         if report_id >= 0xF0:
+            self._dbg("BNO08X PROCESS REPORT...")
+            self._dbg("")
             self._handle_control_report(report_id, report_bytes)
             return
+        
         self._dbg("\tProcessing report:", reports[report_id])
+        
         if self._debug:
             outstr = ""
             for idx, packet_byte in enumerate(report_bytes):
@@ -889,12 +899,18 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
             activity_classification = _parse_activity_classifier_report(report_bytes)
             self._readings[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
+        
         sensor_data, accuracy = _parse_sensor_report_data(report_bytes)
+        
+        self._dbg("Sensor data ",sensor_data,"Accuracy ", accuracy)
+        self._dbg("")
+        
         if report_id == BNO_REPORT_MAGNETOMETER:
             self._magnetometer_accuracy = accuracy
         # TODO: FIXME; Sensor reports are batched in a LIFO which means that multiple reports
         # for the same type will end with the oldest/last being kept and the other
         # newer reports thrown away
+        
         self._readings[report_id] = sensor_data
 
     # TODO: Make this a Packet creation
@@ -931,6 +947,7 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         start_time = time.ticks_ms()
         while  time.ticks_diff(time.ticks_ms(), start_time) < _FEATURE_ENABLE_TIMEOUT :
             self._process_available_packets(max_packets=10)
+            self._dbg("Feature IDs",self._readings)
             if feature_id in self._readings:
                 return
         raise RuntimeError("Was not able to enable feature", feature_id)
@@ -996,6 +1013,8 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     def hard_reset(self):
         """Hardware reset the sensor to an initial unconfigured state"""
+        self._dbg("BNO08X : HARD RESETTING...")
+        self._dbg("")
         if not self._reset:
             return
         from machine import Pin  # pylint:disable=import-outside-toplevel
