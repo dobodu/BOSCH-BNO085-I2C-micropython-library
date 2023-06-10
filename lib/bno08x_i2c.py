@@ -50,36 +50,39 @@ class BNO08X_I2C(BNO08X):
         self._dbg("")
         #Reads the first 4 bytes available as a header ==> Expecting a header
         self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[0:4])
-        packet_header = Packet.header_from_buffer(self._data_buffer)
+        packet_header = Packet.header_from_buffer(self._data_buffer[0:4])
         self._dbg("\t",packet_header)
         self._dbg("")
         return packet_header
 
     def _read_packet(self):
         self._dbg("BNO08X_I2C READ PACKET...")
+        self._dbg("")
         #Read a packet
         #Begin with reading a header ==> Expecting a header 
         #Debugging Working better with self._data_buffer but should be self._data_buffer[0:4] ???
         self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer)
-        self._dbg("")
-        self._dbg("\tSHTP READ packet header: ", [hex(x) for x in self._data_buffer[0:4]])
+        #self._dbg("\tSHTP READ packet header: ", [hex(x) for x in self._data_buffer[0:4]])
 
         header = Packet.header_from_buffer(self._data_buffer[0:4])
-        packet_byte_count = header.packet_byte_count
+        packet_byte_count = header.packet_byte_count   
         channel_number = header.channel_number
         sequence_number = header.sequence_number
+        data_length = header.data_length #data_lenth equals packet_bytes_count minus 4
 
         self._sequence_number[channel_number] = sequence_number
         if packet_byte_count == 0:
             self._dbg("\tSKIPPING NO PACKETS AVAILABLE IN i2c._read_packet")
             self._dbg("")
             raise PacketError("No packet available")
-        packet_byte_count -= 4
-        self._dbg("\tChannel", channel_number, "has", packet_byte_count, "bytes available to read")
+        #packet_byte_count -= 4
+        #self._dbg("\tChannel", channel_number, "has", packet_byte_count, "bytes available to read")
+        self._dbg("\tChannel", channel_number, "has", data_length, "bytes available to read")
 
-        self._read(packet_byte_count)
+        #self._read(packet_byte_count)
+        #self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[4:packet_byte_count])
 
-        new_packet = Packet(self._data_buffer,True)
+        new_packet = Packet(self._data_buffer[0:packet_byte_count],True)
         if self._debug:
             print(new_packet)
 
