@@ -343,9 +343,9 @@ class Packet:
         
     def __str__(self):
         length = self.header.packet_byte_count
-        outstr = "\nDBG::\t\t\t HEADER:\n"
-        outstr += "DBG::\t\t\t Data Len: %d\n" % (self.header.data_length)
-        outstr += "DBG::\t\t\t Channel: %s (%d)\n" % (
+        outstr = "DBG::\nDBG::\t\t\t HEADER:\n"
+        outstr += "DBG::\t\t\t\t Data Len: %d\n" % (self.header.data_length)
+        outstr += "DBG::\t\t\t\t Channel: %s (%d)\n" % (
             channels[self.channel_number],
             self.channel_number,
         )
@@ -354,12 +354,12 @@ class Packet:
             _BNO_CHANNEL_INPUT_SENSOR_REPORTS,
         ]:
             if self.report_id in reports:
-                outstr += "DBG::\t\t\t Report Type: %s (0x%x)\n" % (
+                outstr += "DBG::\t\t\t\t Report Type: %s (0x%x)\n" % (
                     reports[self.report_id],
                     self.report_id,
                 )
             else:
-                outstr += "DBG::\t\t\t** UNKNOWN Report Type **: %s\n" % hex(
+                outstr += "DBG::\t\t\t\t** UNKNOWN Report Type **: %s\n" % hex(
                     self.report_id
                 )
 
@@ -368,7 +368,7 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[5] in reports
             ):
-                outstr += "DBG::\t\t\tSensor Report Type: %s(%s)\n" % (
+                outstr += "DBG::\t\t\t\tSensor Report Type: %s(%s)\n" % (
                     reports[self.data[5]],
                     hex(self.data[5]),
                 )
@@ -378,19 +378,19 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[1] in reports
             ):
-                outstr += "DBG::\t\t\tEnabled Feature: %s(%s)\n" % (
+                outstr += "DBG::\t\t\t\tEnabled Feature: %s(%s)\n" % (
                     reports[self.data[1]],
                     hex(self.data[5]),
                 )
-        outstr += "DBG::\t\t\t Sequence number: %s\n" % self.header.sequence_number
-        outstr += "DBG::\t\t\t Data:"
+        outstr += "DBG::\t\t\t\t Sequence number: %s\n" % self.header.sequence_number
+        outstr += "DBG::\t\t\t DATA:"
 
         for idx, packet_byte in enumerate(self.data[:length]):
             packet_index = idx + 4
             if (packet_index % 4) == 0:
-                outstr += "\n\t\t\t[0x{:02X}] ".format(packet_index)
+                outstr += "\nDBG::\t\t\t\t[0x{:02X}] ".format(packet_index)
             outstr += "0x{:02X} ".format(packet_byte)
-        outstr += "\n"
+        outstr += "\nDBG::"
 
         return outstr
 
@@ -465,7 +465,7 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     def initialize(self):
         """Initialize the sensor"""
-        print("Hard reset")
+        self._dbg("BNO08X : HARD RESETTING")
         for _ in range(3):
             self.hard_reset()
             self.soft_reset()
@@ -735,7 +735,8 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
     # # decorator?
     def _process_available_packets(self, max_packets=None):
         processed_count = 0
-        self._dbg("*******Max_packet = ",max_packets," and processed count = ",processed_count)
+        self._dbg("BNO08X PROCESSING AVAILABLE PACKETS : Max_packet = ",processed_count,"/",max_packets)
+        self._dbg("")
         while self._data_ready:
             if max_packets and processed_count > max_packets:
                 return
@@ -746,20 +747,24 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
                 continue
             self._handle_packet(new_packet)
             processed_count += 1
-            self._dbg("*******Processed_count = ",processed_count," packets")
+            self._dbg("\t Packets processed = ",processed_count)
+            self._dbg("")
+        self._dbg("BNO08X PROCESSING AVAILABLE PACKETS : DONE!")
         self._dbg("")
-        self._dbg(" ** DONE! **")
 
     def _wait_for_packet_type(self, channel_number, report_id=None, timeout=10000, debug=True):
         if report_id:
             report_id_str = " with report id %s" % hex(report_id)
         else:
             report_id_str = ""
-        self._dbg("WAIT FOR PACKET on channel", channel_number, report_id_str)
+        self._dbg("WAITING FOR PACKET on channel", channel_number, report_id_str)
+        self._dbg("")
         start_time = time.ticks_ms()
         while time.ticks_diff(time.ticks_ms(), start_time) < timeout :
             new_packet = self._wait_for_packet()
-            self._dbg("NEW PACKET : ", new_packet)
+            self._dbg("NEW PACKET : ")
+            if self._debug:
+                print(new_packet)
 
             if new_packet.channel_number == channel_number:
                 if report_id:
@@ -774,9 +779,12 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         raise RuntimeError("Timed out waiting for a packet on channel", channel_number)
 
     def _wait_for_packet(self, timeout=_PACKET_READ_TIMEOUT):
+        self._dbg("WAITING FOR PACKET")
+        self._dbg("")
         start_time = time.ticks_ms()
         while  time.ticks_diff(time.ticks_ms(), start_time) < timeout :
             if not self._data_ready:
+                print("NOT READY")
                 continue
             new_packet = self._read_packet()
             return new_packet
@@ -792,26 +800,22 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
 
     def _handle_packet(self, packet):
         # split out reports first
+        self._dbg("BNO08X HANDLE PACKET")
+        self._dbg("")
         try:
             _separate_batch(packet, self._packet_slices)
             while len(self._packet_slices) > 0:
                 self._process_report(*self._packet_slices.pop())
         except Exception as error:
-            print(packet)
+            self._dbg(packet)
             raise error
 
     def _handle_control_report(self, report_id, report_bytes):
         if report_id == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
-            (
-                sw_part_number,
-                sw_major,
-                sw_minor,
-                sw_patch,
-                sw_build_number,
-            ) = parse_sensor_id(report_bytes)
-            self._dbg("FROM PACKET SLICE:")
-            self._dbg("*** Part Number: %d" % sw_part_number)
-            self._dbg("*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
+            (sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number) = parse_sensor_id(report_bytes)
+            self._dbg("\tFROM PACKET SLICE:")
+            self._dbg("\t*** Part Number: %d" % sw_part_number)
+            self._dbg("\t*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
             self._dbg("\tBuild: %d" % (sw_build_number))
             self._dbg("")
 
@@ -908,23 +912,20 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
     # TODO2: I think this should call an fn that imports all the bits for the given feature
     # so we're not carrying around  stuff for extra features
     def enable_feature(self, feature_id):
-        """Used to enable a given feature of the BNO08x"""
-        self._dbg("\n********** Enabling feature id:", feature_id, "**********")
-
+        #Used to enable a given feature of the BNO08x
+        self._dbg("BNO08X ENABLING FEATURE ID", feature_id)
+        self._dbg("")
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            set_feature_report = self._get_feature_enable_report(
-                feature_id, sensor_specific_config=_ENABLED_ACTIVITIES
-            )
+            set_feature_report = self._get_feature_enable_report(feature_id, sensor_specific_config=_ENABLED_ACTIVITIES)
         else:
             set_feature_report = self._get_feature_enable_report(feature_id)
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         # if the feature was enabled it will have a key in the readings dict
         if feature_dependency and feature_dependency not in self._readings:
-            self._dbg("Enabling feature depencency:", feature_dependency)
+            self._dbg("\tEnabling feature depencency:", feature_dependency)
             self.enable_feature(feature_dependency)
 
-        self._dbg("Enabling", feature_id)
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
         
         start_time = time.ticks_ms()
@@ -935,16 +936,19 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         raise RuntimeError("Was not able to enable feature", feature_id)
 
     def _check_id(self):
-        self._dbg("CHECK ID...")
+        self._dbg("BNO08X CHECK ID...")
+        self._dbg("")
         if self._id_read:
             return True
         data = bytearray(2)
         data[0] = _SHTP_REPORT_PRODUCT_ID_REQUEST
         data[1] = 0  # padding
-        self._dbg("CHECK ID : Sending ID Request Report")         
+        self._dbg("CHECK ID : Sending ID Request Report")
+        self._dbg("")
         self._send_packet(_BNO_CHANNEL_CONTROL, data)
         self._dbg("CHECK ID : Waiting for packet")
-        # _a_ packet arrived, but which one?
+        self._dbg("")
+        
         while True:
             self._wait_for_packet_type(
                 _BNO_CHANNEL_CONTROL, _SHTP_REPORT_PRODUCT_ID_RESPONSE
@@ -958,7 +962,7 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         return False
 
     def _parse_sensor_id(self):
-        print("Data Buffer 4",self._data_buffer[4])
+        self._dbg("PARSE SENSOR ID : BUFFER DATA IS : ", self._data_buffer[4])
         if not self._data_buffer[4] == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
             return None
 
@@ -969,9 +973,9 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
         sw_build_number = self._get_data(8, "<I")
 
         self._dbg("")
-        self._dbg("*** Part Number: %d" % sw_part_number)
-        self._dbg("*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
-        self._dbg(" Build: %d" % (sw_build_number))
+        self._dbg("\t*** Part Number: %d" % sw_part_number)
+        self._dbg("\t*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
+        self._dbg("\t*** Build: %d" % (sw_build_number))
         self._dbg("")
         # TODO: this is only one of the numbers!
         return sw_part_number
@@ -1007,6 +1011,7 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
     def soft_reset(self):
         """Reset the sensor to an initial unconfigured state"""
         self._dbg("BNO08X : SOFT RESETTING...")
+        self._dbg("")
         data = bytearray(1)
         data[0] = 1
         _seq = self._send_packet(BNO_CHANNEL_EXE, data)
@@ -1019,8 +1024,9 @@ class BNO08X:  # pylint: disable=too-many-instance-attributes, too-many-public-m
                 _packet = self._read_packet()
             except PacketError:
                 time.sleep(0.5)
-
+        self._dbg("")
         self._dbg("BNO08X SOFT RESET OK!")
+        self._dbg("")
         # all is good!
 
     def _send_packet(self, channel, data):
