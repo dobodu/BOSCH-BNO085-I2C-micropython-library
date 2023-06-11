@@ -26,7 +26,7 @@ Implentation of sensors is done throught
 
     bno.enable_feature(BNO_REPORT_ACCELEROMETER)  for accelerometer
     
-    Please check #Reports Summary on top of bno08x_i2c to find your needs
+Please check #Reports Summary on top of bno08x_i2c to find your needs
     
 Sensors values are obtained with
 
