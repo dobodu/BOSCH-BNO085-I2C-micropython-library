@@ -35,7 +35,7 @@ class BNO08X_I2C(BNO08X):
         self._dbg("BNO08X_I2C SENDING Packet : ")
         if self._debug:
             print(packet)
-        self.bus_device_obj.writeto(self.bno_address, self._data_buffer[0:write_length], True)
+        self.bus_device_obj.writeto(self.bno_address, self._data_buffer[0:write_length])
 
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
         return self._sequence_number[channel]
@@ -54,33 +54,47 @@ class BNO08X_I2C(BNO08X):
         return packet_header
 
     def _read_packet(self):
+        
         self._dbg("BNO08X_I2C READ PACKET :")
         self._dbg("")
-        #Read a packet
-        #Begin with reading a header ==> Expecting a header 
-        #Debugging Working better with self._data_buffer but should be self._data_buffer[0:4] ???
-        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer)
-        #self._dbg("\tSHTP READ packet header: ", [hex(x) for x in self._data_buffer[0:4]])
+        
+        #Read a packet packet = header + packet data
+        #Header is 4 bytes long (2 bytes size, 1 byte for channel number and 1 byte for sequence number)
+        #Buffer is declared in classe : self._data_buffer = bytearray(512)
+        #I2C adress is declared in class : self.bno_address = const(0x4A)
+        #Begin with reading a header ==> Expecting a header (4 bytes)
+        #Should be readfrom_into(self.bno_address, self._data_buffer[0:4])
+        #but does not give the same values compared to readfrom_into(self.bno_address, self._data_buffer)
+        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[0:4])
+        
+        self._dbg("\tself._data_buffer[0:4] contains : ", self._data_buffer[0:4])
+        self._dbg("")
+        
+        header = Packet.header_from_buffer(self._data_buffer[0:4])  #tested and working correctly
+        packet_byte_count = header.packet_byte_count   				# Working
+        channel_number = header.channel_number						# Working
+        sequence_number = header.sequence_number					# Working
+        data_length = header.data_length 							# Working, data_lenth equals packet_bytes_count minus 4 (header length)
 
-        header = Packet.header_from_buffer(self._data_buffer[0:4])
-        packet_byte_count = header.packet_byte_count   
-        channel_number = header.channel_number
-        sequence_number = header.sequence_number
-        data_length = header.data_length #data_lenth equals packet_bytes_count minus 4
+        self._sequence_number[channel_number] = sequence_number		# Seq num stored sorted by channel num.
 
-        self._sequence_number[channel_number] = sequence_number
         if packet_byte_count == 0:
             self._dbg("\tSKIPPING NO PACKETS AVAILABLE IN i2c._read_packet")
             self._dbg("")
             raise PacketError("No packet available")
-        #packet_byte_count -= 4
-        #self._dbg("\tChannel", channel_number, "has", packet_byte_count, "bytes available to read")
+
         self._dbg("\tChannel", channel_number, "has", data_length, "bytes available to read")
 
-        #self._read(packet_byte_count)
-        #self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[4:packet_byte_count])
+        #Consequence, normaly next thing is to read the packet data but of course when reading
+        #the full size buffer before, the reading is incorrect
+        #Buffer must be after this sequence
+        #   0  1  2  3  4  5  6  7  8  9 ...
+        #   **HEADER**  **PACKET DATA******
+        #
+        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[4:packet_byte_count])
 
-        new_packet = Packet(self._data_buffer[0:packet_byte_count],True)
+        #Then process the packet : Tested and working 
+        new_packet = Packet(self._data_buffer[0:packet_byte_count])#,True)
         if self._debug:
             print(new_packet)
 
@@ -91,12 +105,11 @@ class BNO08X_I2C(BNO08X):
     # returns true if all requested data was read
     def _read(self, requested_read_length):
         self._dbg("\tTrying to read", requested_read_length, "bytes")
-        # +4 for the header
         total_read_length = requested_read_length + 4
         if total_read_length > DATA_BUFFER_SIZE:
             self._data_buffer = bytearray(total_read_length)
             self._dbg("!!!!! Increased _data_buffer to bytearray(%d) !!!!!" % total_read_length)
-        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[0:total_read_length])
+        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer[4:total_read_length])
 
 
     @property
