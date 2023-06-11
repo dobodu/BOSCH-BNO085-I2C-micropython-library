@@ -12,10 +12,10 @@ from machine import I2C, Pin
 import time
 from bno08x_i2c import *
 
-I2C1_SDA = Pin(16)
-I2C1_SCL = Pin(17)
+I2C0_SDA = Pin(16)
+I2C0_SCL = Pin(17)
 
-i2c0 = I2C(0, scl=I2C1_SCL, sda=I2C1_SDA, freq=100000, timeout=200000 )
+i2c0 = I2C(0, scl=I2C0_SCL, sda=I2C0_SDA, freq=100000, timeout=200000 )
 print("I2C Device found at address : ",i2c0.scan(),"\n")
 
 bno = BNO08X_I2C(i2c0, debug=False)
