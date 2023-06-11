@@ -35,6 +35,7 @@ ME_CALIBRATE = 0x07
 ME_GET_CAL = 0x01
 ME_CAL_CONFIG = 0x00
 
+#Reports Summary
 BNO_REPORT_ACCELEROMETER = 0x01			# Calibrated Acceleration (m/s2)
 BNO_REPORT_GYROSCOPE = 0x02				# Calibrated gyroscope (rad/s).
 BNO_REPORT_MAGNETOMETER = 0x03			# Magnetic field calibrated (in µTesla). The fully calibrated magnetic field measurement.
@@ -500,25 +501,26 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
     :param ~busio.I2C i2c_bus: The I2C bus the BNO08x is connected to.
     """
 
-    def __init__(self, i2c_bus, reset=None, address=None, reset_pin=None, debug=False):
+    def __init__(self, i2c_bus, address=None, reset_pin=None, debug=False):
         
         self._debug = debug
-        self.bus_device_obj = i2c_bus
-        self._reset = reset
+        self._i2cbus = i2c_bus
         self._reset_pin = reset_pin
         
         #Searching for BNO08x adresses on I2C bus if not specifyed
         if address is None :
-            devices = set(self.bus_device_obj.scan())
+            devices = set(self._i2cbus.scan())
             mpus = devices.intersection(set(BNO08X_DEFAULT_ADDRESS))
             nb_of_mpus = len(mpus)
             if nb_of_mpus == 0:
                 raise MPUException("No BNO08x detected")
             elif nb_of_mpus == 1:
-                self.bno_address = mpus.pop()
-                self._dbg("BNO08X_I2C : DEVICE FOUND AT ADDRESS... ",hex(self.bno_address))
+                self._bno_add = mpus.pop()
+                self._dbg("BNO08X_I2C : DEVICE FOUND AT ADDRESS... ",hex(self._bno_add))
             else:
                 raise ValueError("Two BNO08x detected: must specify a device address")
+        else :
+            self._bno_add = address    
         
         self._dbg("BNO08X_I2C : INITIALISATION...")
         self._data_buffer = bytearray(DATA_BUFFER_SIZE)
@@ -1111,7 +1113,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
     def hard_reset(self):
         """Hardware reset the sensor to an initial unconfigured state"""
         self._dbg("BNO08X_I2C : HARD RESETTING...")
-        if not self._reset or self._reset_pin != None :
+        if self._reset_pin == None :
             return
         from machine import Pin  # pylint:disable=import-outside-toplevel
 
@@ -1161,7 +1163,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
             print(packet)
         
         #Send the packet to the I2C bus and increase the sequence number
-        self.bus_device_obj.writeto(self.bno_address, self._data_buffer[0:write_length])
+        self._i2cbus.writeto(self._bno_add, self._data_buffer[0:write_length])
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
         
         return self._sequence_number[channel]
@@ -1175,10 +1177,10 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         #Header is 4 bytes long (2 bytes size, 1 byte for channel number and 1 byte for sequence number)
         #Buffer is declared in BNO08X class : self._data_buffer = bytearray(512)
         #But here we use the memoryimage from this buffer which is declared in BNO08X class
-        #I2C adress is declared in class : self.bno_address
+        #I2C adress is declared in class : self._bno_add
         
         #Begin with reading a header ==> Expecting a header (4 bytes)
-        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer_mv[0:4])
+        self._i2cbus.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
         
         self._dbg("\tself._data_buffer[0:4] contains : ", self._data_buffer[0:4])
         self._dbg("")
@@ -1199,7 +1201,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         self._dbg("\tChannel", channel_number, "has", data_length, "bytes available to read")
 
         #Then we read the packet data to the buffer image
-        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer_mv[0:packet_byte_count])
+        self._i2cbus.readfrom_into(self._bno_add, self._data_buffer_mv[0:packet_byte_count])
 
         #Then process the packet 
         new_packet = Packet(self._data_buffer[0:packet_byte_count])#,True)
@@ -1218,7 +1220,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         self._dbg("")
         
         #Reads the first 4 bytes available as a header ==> Expecting a header
-        self.bus_device_obj.readfrom_into(self.bno_address, self._data_buffer_mv[0:4])
+        self._i2cbus.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
         packet_header = Packet.header_from_buffer(self._data_buffer[0:4])
         
         self._dbg("\t",packet_header)
