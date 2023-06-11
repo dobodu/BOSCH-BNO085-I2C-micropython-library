@@ -1,3 +1,18 @@
+# BNO08X Micropython I2C Library by Dobodu
+#
+# Adapted from original Adafruit CircuitPyhton library
+#
+# SPDX-FileCopyrightText: Copyright (c) 2020 Bryan Siepert for Adafruit Industries
+#
+# SPDX-License-Identifier: MIT
+#
+# TODO : (From original Library)
+#
+# Calibrated Acceleration (m/s2)
+# Euler Angles
+# Calibration
+# Raw ACCEL, MAG, GYRO
+
 from struct import unpack_from, pack_into
 from collections import namedtuple
 import time
@@ -5,7 +20,10 @@ import time
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
 
-# Channel NUMBERS
+#Buffer Size
+DATA_BUFFER_SIZE = 512  # Eats ram !
+
+# Channel Numbers
 BNO_CHANNEL_SHTP_COMMAND = 0x00
 BNO_CHANNEL_EXE = 0x01
 BNO_CHANNEL_CONTROL = 0x02
@@ -13,13 +31,14 @@ BNO_CHANNEL_INPUT_SENSOR_REPORTS = 0x03
 BNO_CHANNEL_WAKE_INPUT_SENSOR_REPORTS = 0x04
 BNO_CHANNEL_GYRO_ROTATION_VECTOR = 0x05
 
+#Configuring Reports
 GET_FEATURE_REQUEST = 0xFE
 SET_FEATURE_COMMAND = 0xFD
 GET_FEATURE_RESPONSE = 0xFC
 BASE_TIMESTAMP = 0xFB
 REBASE_TIMESTAMP = 0xFA
-SHTP_REPORT_ID_RESPONSE = 0xF8
 SHTP_REPORT_ID_REQUEST = 0xF9
+SHTP_REPORT_ID_RESPONSE = 0xF8
 FRS_WRITE_REQUEST = 0xF7
 FRS_WRITE_DATA = 0xF6
 FRS_WRITE_RESPONSE = 0xF5
@@ -27,24 +46,35 @@ FRS_READ_REQUEST = 0xF4
 FRS_READ_RESPONSE = 0xF3
 COMMAND_REQUEST = 0xF2
 COMMAND_RESPONSE = 0xF1
-SHTP_RESET = 0x01
 
 # DCD/ ME Calibration commands and sub-commands
-SAVE_DCD = 0x06
+CLEAR_DCD_RESET = 0x0B
+OSCILLATOR_TYPE = 0x0A
+SAVE_DCD_PERIODIC = 0x09
 ME_CALIBRATE = 0x07
+SAVE_DCD = 0x06
+INITIALIZATION = 0x04
+TARE = 0x03
+COUNTER_CDE = 0x02
 ME_GET_CAL = 0x01
 ME_CAL_CONFIG = 0x00
 
-#Reports Summary
-BNO_REPORT_ACCELEROMETER = 0x01			# Calibrated Acceleration (m/s2)
-BNO_REPORT_GYROSCOPE = 0x02				# Calibrated gyroscope (rad/s).
-BNO_REPORT_MAGNETOMETER = 0x03			# Magnetic field calibrated (in µTesla). The fully calibrated magnetic field measurement.
-BNO_REPORT_LINEAR_ACCELERATION = 0x04	# Linear acceleration (m/s2). Acceleration of the device with gravity removed
-BNO_REPORT_ROTATION_VECTOR = 0x05		# Rotation Vector
-BNO_REPORT_GRAVITY = 0x06				# Gravity Vector (m/s2). Vector direction of gravity
+#Reports Summary depending on BNO device 
+BNO_REPORT_ACCELEROMETER = 0x01
+BNO_REPORT_GYROSCOPE = 0x02
+BNO_REPORT_MAGNETOMETER = 0x03
+BNO_REPORT_LINEAR_ACCELERATION = 0x04
+BNO_REPORT_ROTATION_VECTOR = 0x05
+BNO_REPORT_GRAVITY = 0x06
 BNO_REPORT_UNCALIBRATED_GYROSCOPE = 0x07
-BNO_REPORT_GAME_ROTATION_VECTOR = 0x08	# Game Rotation Vector
+BNO_REPORT_GAME_ROTATION_VECTOR = 0x08
 BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR = 0x09
+BNO_REPORT_PRESSURE = 0x0A
+BNO_REPORT_AMBIENT_LIGHT = 0x0B
+BNO_REPORT_HUMIDITY = 0x0C
+BNO_REPORT_PROXIMITY = 0x0D
+BNO_REPORT_TEMPERATURE = 0x0E
+BNO_REPORT_UNCALIBRATED_MAGNETOMETER = 0x0F
 BNO_REPORT_TAP_DETECTOR = 0x10
 BNO_REPORT_STEP_COUNTER = 0x11
 BNO_REPORT_SIGNIFICANT_MOTION = 0x12
@@ -63,39 +93,33 @@ BNO_REPORT_SLEEP_DETECTOR = 0x1F
 BNO_REPORT_TILT_DETECTOR = 0x20
 BNO_REPORT_POCKET_DETECTOR = 0x21
 BNO_REPORT_CIRCLE_DETECTOR = 0x22
+BNO_REPORT_HEART_RATE_MONITOR = 0x23
 BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR = 0x28
 BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR = 0x29
 BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR = 0x2A
 
-
-# TODOz:
-# Calibrated Acceleration (m/s2)
-# Euler Angles (in degrees?)
-# CALIBRATION
-# RAW ACCEL, MAG, GYRO # Sfe says each needs the non-raw enabled to work
-
-DEFAULT_REPORT_INTERVAL = 50000  # in microseconds = 50ms
-QUAT_READ_TIMEOUT = 500  # timeout in ms
+#Timeouts (ms) and intervals (us)
+DEFAULT_REPORT_INTERVAL = 50000
+QUAT_READ_TIMEOUT = 500
 PACKET_READ_TIMEOUT = 2000 
 FEATURE_ENABLE_TIMEOUT = 2000
 DEFAULT_TIMEOUT = 2000
 
+#Quaternions and precisions
 QUAT_Q_POINT = 0x05 # 14 by default
-BNO_HEADER_LEN = 0x04 # Header are 4 bytes long
-
 Q_POINT_14_SCALAR = 2 ** (14 * -1)
 Q_POINT_12_SCALAR = 2 ** (12 * -1)
 Q_POINT_10_SCALAR = 2 ** (10 * -1)
 Q_POINT_9_SCALAR = 2 ** (9 * -1)
 Q_POINT_8_SCALAR = 2 ** (8 * -1)
 Q_POINT_4_SCALAR = 2 ** (4 * -1)
-
 GYRO_SCALAR = Q_POINT_9_SCALAR
 ACCEL_SCALAR = Q_POINT_8_SCALAR
 QUAT_SCALAR = Q_POINT_14_SCALAR
 GEOQUAT_SCALAR = Q_POINT_12_SCALAR
 MAG_SCALAR = Q_POINT_4_SCALAR
 
+#Report Lengths
 REPORT_LENGTHS = {
     SHTP_REPORT_ID_RESPONSE: 16,
     GET_FEATURE_RESPONSE: 17,
@@ -104,12 +128,15 @@ REPORT_LENGTHS = {
     BASE_TIMESTAMP: 5,
     REBASE_TIMESTAMP: 5,
 }
-# these raw reports require their counterpart to be enabled
+
+#Raw reports requiring their counterpart to be enabled
 RAW_REPORTS = {
     BNO_REPORT_RAW_ACCELEROMETER: BNO_REPORT_ACCELEROMETER,
     BNO_REPORT_RAW_GYROSCOPE: BNO_REPORT_GYROSCOPE,
     BNO_REPORT_RAW_MAGNETOMETER: BNO_REPORT_MAGNETOMETER,
 }
+
+#Available sensor reports
 AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_ACCELEROMETER: (Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_GRAVITY: (Q_POINT_8_SCALAR, 3, 10),
@@ -127,6 +154,8 @@ AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_RAW_GYROSCOPE: (1, 3, 16),
     BNO_REPORT_RAW_MAGNETOMETER: (1, 3, 16),
 }
+
+#Initial reports config
 INITIAL_REPORTS = {
     BNO_REPORT_ACTIVITY_CLASSIFIER: {
         "Tilting": -1,
@@ -147,6 +176,7 @@ INITIAL_REPORTS = {
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
 }
 
+#Dictionnaries for debugging 
 CHANNELS_DICTIONARY = {
     0x0: "SHTP_COMMAND",
     0x1: "EXE",
@@ -206,8 +236,6 @@ REPORTS_DICTIONARY = {
 ENABLED_ACTIVITIES = (
     0x1FF  # All activities; 1 bit set for each of 8 activities, + Unknown
 )
-
-DATA_BUFFER_SIZE = const(512)  # data buffer size. obviously eats ram
 
 PacketHeader = namedtuple(
     "PacketHeader",
@@ -401,8 +429,8 @@ class Packet:
     def __init__(self, packet_bytes, debug=False):
         self._debug = debug
         self.header = self.header_from_buffer(packet_bytes)
-        data_end_index = self.header.data_length + BNO_HEADER_LEN
-        self.data = packet_bytes[BNO_HEADER_LEN:data_end_index]
+        data_end_index = self.header.data_length + 4
+        self.data = packet_bytes[4:data_end_index]
         
     def __str__(self):
         length = self.header.packet_byte_count
