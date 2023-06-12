@@ -23,8 +23,10 @@ i2c_bus
 
 Optionnal :    
 
-address : will try to find by itself, but if using 2 BNO08x you need to define it !
+address : will try to find by itself, but if using 2 BNO08x you need to define it
+
 reset_pin : if a pin identifier is defined, will try to hard reset, otherwise, soft reset only
+
 debug : just in case...  
 
 Implentation of sensors is done throught
