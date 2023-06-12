@@ -57,6 +57,6 @@ while True:
     print("Magnetometer\tX: %0.6f\tY: %0.6f\tZ: %0.6f\tuT" % (mag_x, mag_y, mag_z))
     quat_i, quat_j, quat_k, quat_real = bno.quaternion  # pylint:disable=no-member
     print("Rot Vect Quat\tI: %0.6f\tJ: %0.6f\tK: %0.6f\tReal: %0.6f" % (quat_i, quat_j, quat_k, quat_real))
-    R, T, P = quaternion_to_euler_angle(quat_i, quat_j, quat_k, quat_real)
+    R, T, P = quaternion_to_euler(quat_i, quat_j, quat_k, quat_real)
     print("Euler Angle\tX: %0.1f\tY: %0.1f\tZ: %0.1f" % (R, T, P))
     print("")
