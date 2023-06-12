@@ -10,10 +10,29 @@
 
 from machine import I2C, Pin
 import time
+import math
 from bno08x_i2c import *
 
 I2C0_SDA = Pin(16)
 I2C0_SCL = Pin(17)
+
+def quaternion_to_euler(i, j, k, w):
+    jsqr = j * j
+
+    t0 = +2.0 * (w * i + j * k)
+    t1 = +1.0 - 2.0 * (i * i + jsqr)
+    Roll = math.degrees(math.atan2(t0, t1))
+
+    t2 = +2.0 * (w * j - k * i)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    Tilt = math.degrees(math.asin(t2))
+
+    t3 = +2.0 * (w * k + i * j)
+    t4 = +1.0 - 2.0 * (jsqr + k * k)
+    Pan = math.degrees(math.atan2(t3, t4))
+
+    return Roll, Tilt, Pan
 
 i2c0 = I2C(0, scl=I2C0_SCL, sda=I2C0_SDA, freq=100000, timeout=200000 )
 print("I2C Device found at address : ",i2c0.scan(),"\n")
@@ -38,4 +57,6 @@ while True:
     print("Magnetometer\tX: %0.6f\tY: %0.6f\tZ: %0.6f\tuT" % (mag_x, mag_y, mag_z))
     quat_i, quat_j, quat_k, quat_real = bno.quaternion  # pylint:disable=no-member
     print("Rot Vect Quat\tI: %0.6f\tJ: %0.6f\tK: %0.6f\tReal: %0.6f" % (quat_i, quat_j, quat_k, quat_real))
+    R, T, P = quaternion_to_euler_angle(quat_i, quat_j, quat_k, quat_real)
+    print("Euler Angle\tX: %0.1f\tY: %0.1f\tZ: %0.1f" % (R, T, P))
     print("")
