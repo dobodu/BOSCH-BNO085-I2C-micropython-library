@@ -34,6 +34,13 @@ def quaternion_to_euler(i, j, k, w):
 
     return Roll, Tilt, Pan
 
+def compass(x,y):
+    comp = 180 * math.atan2(y, x) / math.pi
+    if comp < 0 :
+        comp += 360
+    return comp
+
+
 i2c0 = I2C(0, scl=I2C0_SCL, sda=I2C0_SDA, freq=100000, timeout=200000 )
 print("I2C Device found at address : ",i2c0.scan(),"\n")
 
@@ -59,4 +66,6 @@ while True:
     print("Rot Vect Quat\tI: %0.6f\tJ: %0.6f\tK: %0.6f\tReal: %0.6f" % (quat_i, quat_j, quat_k, quat_real))
     R, T, P = quaternion_to_euler(quat_i, quat_j, quat_k, quat_real)
     print("Euler Angle\tX: %0.1f\tY: %0.1f\tZ: %0.1f" % (R, T, P))
+    C = compass(mag_x,mag_y)
+    print("Compass Angle: %0.1f" % C)
     print("")
