@@ -48,17 +48,27 @@ GET_FEATURE_RESPONSE = 0xFC
 SET_FEATURE_COMMAND = 0xFD
 GET_FEATURE_REQUEST = 0xFE
 
-# DCD/ ME Calibration commands and sub-commands
-ME_CAL_CONFIG = 0x00
-ME_GET_CAL = 0x01
-COUNTER_CDE = 0x02
-TARE = 0x03
-INITIALIZATION = 0x04
-SAVE_DCD = 0x06
-ME_CALIBRATE = 0x07
-SAVE_DCD_PERIODIC = 0x09
-OSCILLATOR_TYPE = 0x0A
-CLEAR_DCD_RESET = 0x0B
+# DCD/ ME Commands
+ME_ERRORREPORT_CDE = 0x01
+ME_COUNTER_CDE = 0x02
+ME_TARE_CDE = 0x03
+ME_INIT_CDE = 0x04
+ME_SAVE_DCD_CDE = 0x06
+ME_CALIBRATION_CDE = 0x07
+ME_SAVE_DCD_PERIODIC_CDE = 0x09
+ME_OSCILLATOR_TYPE_CDE = 0x0A
+ME_RESET_DCD_CDE = 0x0B
+
+#DCD/ME Sub-commands
+ME_COUNTER_GETCOUNTS_CDE = 0x00
+ME_COUNTER_CLEARCOUNTS_CDE = 0x01
+ME_TARE_NOW_SUBCDE = 0x00
+ME_TARE_PERSIST_SUBCDE = 0x01
+ME_TARE_REORIENTATION_SUBCDE = 0x02
+ME_CALIBRATION_CONFIG_SUBCDE = 0x00
+ME_CALIBRATION_GETCAL_SUBCDE = 0x01
+ME_SAVE_DCD_PERIODIC_ENABLE_SUBCDE = 0x00
+ME_SAVE_DCD_PERIODIC_DISABLE_SUBCDE = 0x00
 
 #Reports Summary depending on BNO device 
 BNO_REPORT_ACCELEROMETER = 0x01
@@ -349,7 +359,7 @@ def _parse_shake_report(report_bytes):
 
 
 def parse_sensor_id(buffer):
-    """Parse the fields of a product id report"""
+    #Parse the fields of a product id report
     if not buffer[0] == SHTP_REPORT_ID_RESPONSE:
         raise AttributeError("Wrong report id for sensor id: %s" % hex(buffer[0]))
 
@@ -425,7 +435,7 @@ def _separate_batch(packet, report_slices):
 
 
 class Packet:
-    """A class representing a Hillcrest LaboratorySensor Hub Transport packet"""
+    #A class representing a Hillcrest LaboratorySensor Hub Transport packet
 
     def __init__(self, packet_bytes, debug=False):
         self._debug = debug
@@ -488,17 +498,17 @@ class Packet:
 
     @property
     def report_id(self):
-        """The Packet's Report ID"""
+        #The Packet's Report ID
         return self.data[0]
 
     @property
     def channel_number(self):
-        """The packet channel"""
+        #The packet channel
         return self.header.channel_number
 
     @classmethod
     def header_from_buffer(cls, packet_bytes):
-        """Creates a `PacketHeader` object from a given buffer"""
+        #Creates a `PacketHeader` object from a given buffer
         packet_byte_count = unpack_from("<H", packet_bytes)[0]
         packet_byte_count &= ~0x8000
         channel_number = unpack_from("<B", packet_bytes, 2)[0]
@@ -512,7 +522,7 @@ class Packet:
 
     @classmethod
     def is_error(cls, header):
-        """Returns True if the header is an error condition"""
+        #Returns True if the header is an error condition
 
         if header.channel_number > 5:
             return True
@@ -525,10 +535,8 @@ class Packet:
             print("DBG::\t\t", *args, **kwargs)
 
 
-class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-public-methods
-    """Library for the BNO08x IMUs from Hillcrest Laboratories
-    :param ~busio.I2C i2c_bus: The I2C bus the BNO08x is connected to.
-    """
+class BNO08X_I2C:
+    #Library for the BNO08x IMUs from Hillcrest Laboratories
 
     def __init__(self, i2c_bus, address=None, reset_pin=None, debug=False):
         
@@ -566,6 +574,8 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         self._dcd_saved_at = -1
         self._me_calibration_started_at = -1
         self._calibration_complete = False
+        self._ME_TARE_CDE_started_at = -1
+        self._tare_complete = False
         self._magnetometer_accuracy = 0
         self._wait_for_initialize = True
         self._init_complete = False
@@ -575,7 +585,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         self.initialize()
 
     def initialize(self):
-        """Initialize the sensor"""
+        #Initialize the sensor
         for _ in range(3):
             self.hard_reset()
             self.soft_reset()
@@ -589,7 +599,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def magnetic(self):
-        """A tuple of the current magnetic field measurements on the X, Y, and Z axes"""
+        #A tuple of the current magnetic field measurements on the X, Y, and Z axes
         self._process_available_packets()  # decorator?
         try:
             return self._readings[BNO_REPORT_MAGNETOMETER]
@@ -598,7 +608,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def quaternion(self):
-        """A quaternion representing the current rotation vector"""
+        #A quaternion representing the current rotation vector
         self._process_available_packets()
         try:
             return self._readings[BNO_REPORT_ROTATION_VECTOR]
@@ -607,7 +617,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def euler(self):
-        """A 3-tupple representing the current Pan Tilt and Roll euler angle in degree"""
+        #A 3-tupple representing the current Pan Tilt and Roll euler angle in degree
         self._process_available_packets()
         try:
             q = self._readings[BNO_REPORT_ROTATION_VECTOR]
@@ -632,7 +642,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def geomagnetic_quaternion(self):
-        """A quaternion representing the current geomagnetic rotation vector"""
+        #A quaternion representing the current geomagnetic rotation vector
         self._process_available_packets()
         try:
             return self._readings[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
@@ -766,7 +776,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def raw_acceleration(self):
-        """Returns the sensor's raw, unscaled value from the accelerometer registers"""
+        #Returns the sensor's raw, unscaled value from the accelerometer registers
         self._process_available_packets()
         try:
             raw_acceleration = self._readings[BNO_REPORT_RAW_ACCELEROMETER]
@@ -778,7 +788,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def raw_gyro(self):
-        """Returns the sensor's raw, unscaled value from the gyro registers"""
+        #Returns the sensor's raw, unscaled value from the gyro registers
         self._process_available_packets()
         try:
             raw_gyro = self._readings[BNO_REPORT_RAW_GYROSCOPE]
@@ -788,7 +798,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
 
     @property
     def raw_magnetic(self):
-        """Returns the sensor's raw, unscaled value from the magnetometer registers"""
+        #Returns the sensor's raw, unscaled value from the magnetometer registers
         self._process_available_packets()
         try:
             raw_magnetic = self._readings[BNO_REPORT_RAW_MAGNETOMETER]
@@ -796,15 +806,33 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         except KeyError:
             raise RuntimeError("No raw magnetic report found, is it enabled?") from None
 
-    def begin_calibration(self):
-        """Begin the sensor's self-calibration routine"""
-        # start calibration for accel, gyro, and mag
-        self._send_me_command(
+    def tare(self):
+        #Tare the sensor
+        self._dbg("BNO08X_I2C : MOTION ENGINE TARE BEING DONE...")
+        self._send_ME_cde(ME_TARE_CDE,
+            [
+                0, #Perform Tare Now
+                7, #Perform All axis
+                2, #Apply to all motion outputs
+                0, #Reserved
+                0, #Reserved
+                0, # reserved
+                0, # reserved
+                0, # reserved
+                0, # reserved
+            ]
+        )
+        self._calibration_complete = True
+
+    def calibration(self):
+        #Self-calibrate the sensor
+        self._dbg("BNO08X_I2C : MOTION ENGINE CALIBRATION BEING DONE...")
+        self._send_ME_cde(ME_CALIBRATION_CDE,
             [
                 1,  # calibrate accel
                 1,  # calibrate gyro
                 1,  # calibrate mag
-                ME_CAL_CONFIG,
+                ME_CALIBRATION_CONFIG_SUBCDE,
                 0,  # calibrate planar acceleration
                 0,  # 'on_table' calibration
                 0,  # reserved
@@ -812,17 +840,18 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
                 0,  # reserved
             ]
         )
-        self._calibration_complete = False
+        self._calibration_complete = True
 
     @property
     def calibration_status(self):
-        """Get the status of the self-calibration"""
-        self._send_me_command(
+        #Get the status of the self-calibration
+        self._dbg("BNO08X_I2C : MOTION ENGINE GETTING CALIBRATION STATUS...")
+        self._send_ME_cde(ME_CALIBRATION_CDE,
             [
                 0,  # calibrate accel
                 0,  # calibrate gyro
                 0,  # calibrate mag
-                ME_GET_CAL,
+                ME_CALIBRATION_GETCAL_SUBCDE,
                 0,  # calibrate planar acceleration
                 0,  # 'on_table' calibration
                 0,  # reserved
@@ -832,29 +861,28 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         )
         return self._magnetometer_accuracy
 
-    def _send_me_command(self, subcommand_params):
+    def _send_ME_cde(self, me_cde, subcommand):
         local_buffer = self._command_buffer
         _insertCOMMAND_REquest_report(
-            ME_CALIBRATE,
+            me_cde,
             self._command_buffer,  # should use self._data_buffer :\ but send_packet don't
             self._get_report_seq_id(COMMAND_REQUEST),
-            subcommand_params,
+            subcommand,
         )
         self._send_packet(BNO_CHANNEL_CONTROL, local_buffer)
         self._increment_report_seq(COMMAND_REQUEST)
-        
-        start_time = time.ticks_ms()
+
+        """  start_time = time.ticks_ms()
         while time.ticks_diff(time.ticks_ms(), start_time) < DEFAULT_TIMEOUT:
             self._process_available_packets()
             if self._me_calibration_started_at > start_time:
-                break
+                break"""
 
     def save_calibration_data(self):
-        """Save the self-calibration data"""
-        # send a DCD save command
+        #Save the self-calibration data by sending a DCD save command
         local_buffer = bytearray(12)
         _insertCOMMAND_REquest_report(
-            SAVE_DCD,
+            ME_SAVE_DCD_CDE,
             local_buffer,  # should use self._data_buffer :\ but send_packet don't
             self._get_report_seq_id(COMMAND_REQUEST),
         )
@@ -869,7 +897,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         raise RuntimeError("Could not save calibration data")
 
     ############### private/helper methods ###############
-    # # decorator?
+    
     def _process_available_packets(self, max_packets=None):
         processed_count = 0
         self._dbg("BNO08X_I2C : PROCESSING AVAILABLE PACKETS : Max_packet = ",processed_count,"/",max_packets)
@@ -986,10 +1014,10 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         # status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved) = response_values
         command_status, *_rest = response_values
 
-        if command == ME_CALIBRATE and command_status == 0:
+        if command == ME_CALIBRATION_CDE and command_status == 0:
             self._me_calibration_started_at = time.ticks_ms()
 
-        if command == SAVE_DCD:
+        if command == ME_SAVE_DCD_CDE:
             if command_status == 0:
                 self._dcd_saved_at = time.ticks_ms()
             else:
@@ -1144,7 +1172,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
     # pylint:disable=no-self-use
     @property
     def _data_ready(self):
-        #Check if there is available data on the IéC bus
+        #Check if there is available data on the I2C bus
         header = self._read_header()
 
         if header.channel_number > 5:
@@ -1163,7 +1191,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         return ready
 
     def hard_reset(self):
-        """Hardware reset the sensor to an initial unconfigured state"""
+        #Hardware reset the sensor to an initial unconfigured state
         self._dbg("BNO08X_I2C : HARD RESETTING...")
         if self._reset_pin == None :
             return
@@ -1178,7 +1206,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         time.sleep(0.01)
 
     def soft_reset(self):
-        """Reset the sensor to an initial unconfigured state"""
+        #Reset the sensor to an initial unconfigured state
         self._dbg("BNO08X_I2C : SOFT RESETTING...")
         data = bytearray(1)
         data[0] = 1
