@@ -9,7 +9,7 @@
 # TODO : (From original Library)
 #
 # Calibrated Acceleration (m/s2)
-# Euler Angles
+# Euler Angles   =>   Done
 # Calibration
 # Raw ACCEL, MAG, GYRO
 
@@ -833,7 +833,6 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         return self._magnetometer_accuracy
 
     def _send_me_command(self, subcommand_params):
-        start_time = time.monotonic()
         local_buffer = self._command_buffer
         _insertCOMMAND_REquest_report(
             ME_CALIBRATE,
@@ -853,7 +852,6 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
     def save_calibration_data(self):
         """Save the self-calibration data"""
         # send a DCD save command
-        start_time = time.monotonic()
         local_buffer = bytearray(12)
         _insertCOMMAND_REquest_report(
             SAVE_DCD,
@@ -989,11 +987,11 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
         command_status, *_rest = response_values
 
         if command == ME_CALIBRATE and command_status == 0:
-            self._me_calibration_started_at = time.monotonic()
+            self._me_calibration_started_at = time.ticks_ms()
 
         if command == SAVE_DCD:
             if command_status == 0:
-                self._dcd_saved_at = time.monotonic()
+                self._dcd_saved_at = time.ticks_ms()
             else:
                 raise RuntimeError("Unable to save calibration data")
 
