@@ -15,6 +15,7 @@
 
 from struct import unpack_from, pack_into
 from collections import namedtuple
+from math import asin, atan2, degrees
 import time
 
 #BNO08X SETUP
@@ -32,32 +33,32 @@ BNO_CHANNEL_WAKE_INPUT_SENSOR_REPORTS = 0x04
 BNO_CHANNEL_GYRO_ROTATION_VECTOR = 0x05
 
 #Configuring Reports
-GET_FEATURE_REQUEST = 0xFE
-SET_FEATURE_COMMAND = 0xFD
-GET_FEATURE_RESPONSE = 0xFC
-BASE_TIMESTAMP = 0xFB
-REBASE_TIMESTAMP = 0xFA
-SHTP_REPORT_ID_REQUEST = 0xF9
-SHTP_REPORT_ID_RESPONSE = 0xF8
-FRS_WRITE_REQUEST = 0xF7
-FRS_WRITE_DATA = 0xF6
-FRS_WRITE_RESPONSE = 0xF5
-FRS_READ_REQUEST = 0xF4
-FRS_READ_RESPONSE = 0xF3
-COMMAND_REQUEST = 0xF2
 COMMAND_RESPONSE = 0xF1
+COMMAND_REQUEST = 0xF2
+FRS_READ_RESPONSE = 0xF3
+FRS_READ_REQUEST = 0xF4
+FRS_WRITE_RESPONSE = 0xF5
+FRS_WRITE_DATA = 0xF6
+FRS_WRITE_REQUEST = 0xF7
+SHTP_REPORT_ID_RESPONSE = 0xF8
+SHTP_REPORT_ID_REQUEST = 0xF9
+REBASE_TIMESTAMP = 0xFA
+BASE_TIMESTAMP = 0xFB
+GET_FEATURE_RESPONSE = 0xFC
+SET_FEATURE_COMMAND = 0xFD
+GET_FEATURE_REQUEST = 0xFE
 
 # DCD/ ME Calibration commands and sub-commands
-CLEAR_DCD_RESET = 0x0B
-OSCILLATOR_TYPE = 0x0A
-SAVE_DCD_PERIODIC = 0x09
-ME_CALIBRATE = 0x07
-SAVE_DCD = 0x06
-INITIALIZATION = 0x04
-TARE = 0x03
-COUNTER_CDE = 0x02
-ME_GET_CAL = 0x01
 ME_CAL_CONFIG = 0x00
+ME_GET_CAL = 0x01
+COUNTER_CDE = 0x02
+TARE = 0x03
+INITIALIZATION = 0x04
+SAVE_DCD = 0x06
+ME_CALIBRATE = 0x07
+SAVE_DCD_PERIODIC = 0x09
+OSCILLATOR_TYPE = 0x0A
+CLEAR_DCD_RESET = 0x0B
 
 #Reports Summary depending on BNO device 
 BNO_REPORT_ACCELEROMETER = 0x01
@@ -541,7 +542,7 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
             mpus = devices.intersection(set(BNO08X_DEFAULT_ADDRESS))
             nb_of_mpus = len(mpus)
             if nb_of_mpus == 0:
-                raise MPUException("No BNO08x detected")
+                raise ValueError("No BNO08x detected")
             elif nb_of_mpus == 1:
                 self._bno_add = mpus.pop()
                 self._dbg("BNO08X_I2C : DEVICE FOUND AT ADDRESS... ",hex(self._bno_add))
@@ -603,6 +604,31 @@ class BNO08X_I2C:  # pylint: disable=too-many-instance-attributes, too-many-publ
             return self._readings[BNO_REPORT_ROTATION_VECTOR]
         except KeyError:
             raise RuntimeError("No quaternion report found, is it enabled?") from None
+
+    @property
+    def euler(self):
+        """A 3-tupple representing the current Pan Tilt and Roll euler angle in degree"""
+        self._process_available_packets()
+        try:
+            q = self._readings[BNO_REPORT_ROTATION_VECTOR]
+        except KeyError:
+            raise RuntimeError("No quaternion report found, is it enabled?") from None
+        
+        jsqr = q[1] * q[1]
+        t0 = +2.0 * (q[3] * q[0] + q[1] * q[2])
+        t1 = +1.0 - 2.0 * (q[0] * q[0] + jsqr)
+        Roll = degrees(atan2(t0, t1))
+
+        t2 = +2.0 * (q[3] * q[1] - q[2] * q[0])
+        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        Tilt = degrees(asin(t2))
+
+        t3 = +2.0 * (q[3] * q[2] + q[0] * q[1])
+        t4 = +1.0 - 2.0 * (jsqr + q[2] * q[2])
+        Pan = degrees(atan2(t3, t4))
+
+        return (Roll, Tilt, Pan)
 
     @property
     def geomagnetic_quaternion(self):
