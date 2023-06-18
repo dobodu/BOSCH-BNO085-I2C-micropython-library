@@ -1,5 +1,5 @@
-# Adafruit_MicroPython_BNO08x
-Adafruit Micropython I2C library for BNO08X ( BNO080, BNO085, aso )
+# BOSCH-BNO085-I2C-micropython-library
+Micropython I2C library for 9 dof BOSCH BNO08X sensors ( BNO080, BNO085, aso )
 
 100% inspired by the original Adafruit Circuitpython I2C library for BNO08X
 Copyright (c) 2020 Bryan Siepert for Adafruit Industries
