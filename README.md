@@ -38,3 +38,7 @@ Please check #Reports Summary on top of bno08x_i2c to find your needs
 Sensors values are obtained with
 
     accel_x, accel_y, accel_z = bno.acceleration
+
+Roll Tilt and Pan are obtained with
+
+    roll, tilt, pan = bno.euler
