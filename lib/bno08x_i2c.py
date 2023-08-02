@@ -13,7 +13,7 @@
 # Calibration
 # Raw ACCEL, MAG, GYRO
 
-from struct import unpack_from, pack_into
+from ustruct import unpack_from, pack_into
 from collections import namedtuple
 from math import asin, atan2, degrees
 import time
@@ -150,13 +150,18 @@ RAW_REPORTS = {
 #Available sensor reports
 AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_ACCELEROMETER: (Q_POINT_8_SCALAR, 3, 10),
-    BNO_REPORT_GRAVITY: (Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_GYROSCOPE: (Q_POINT_9_SCALAR, 3, 10),
     BNO_REPORT_MAGNETOMETER: (Q_POINT_4_SCALAR, 3, 10),
-    BNO_REPORT_LINEAR_ACCELERATION: (Q_POINT_8_SCALAR, 3, 10),
+    BNO_REPORT_LINEAR_ACCELERATION: (Q_POINT_8_SCALAR, 3, 10), 
     BNO_REPORT_ROTATION_VECTOR: (Q_POINT_14_SCALAR, 4, 14),
-    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (Q_POINT_12_SCALAR, 4, 14),
+    BNO_REPORT_GRAVITY: (Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_GAME_ROTATION_VECTOR: (Q_POINT_14_SCALAR, 4, 12),
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (Q_POINT_12_SCALAR, 4, 14),
+    BNO_REPORT_PRESSURE : (1, 1, 8),
+    BNO_REPORT_AMBIENT_LIGHT : (1, 1, 8),
+    BNO_REPORT_HUMIDITY  : (1, 1, 6),
+    BNO_REPORT_PROXIMITY : (1, 1, 6),
+    BNO_REPORT_TEMPERATURE  : (1, 1, 6),
     BNO_REPORT_STEP_COUNTER: (1, 1, 12),
     BNO_REPORT_SHAKE_DETECTOR: (1, 1, 6),
     BNO_REPORT_STABILITY_CLASSIFIER: (1, 1, 6),
@@ -207,6 +212,11 @@ REPORTS_DICTIONARY = {
     0x07: "UNCALIBRATED_GYROSCOPE",
     0x08: "GAME_ROTATION_VECTOR",
     0x09: "GEOMAGNETIC_ROTATION_VECTOR",
+    0x0A: "PRESSURE",
+    0x0B: "AMBIENT LIGHT",
+    0x0C: "HUMIDITY",
+    0x0D: "PROXIMITY",
+    0x0E: "TEMPERATURE",
     0x0F: "UNCALIBRATED_MAGNETIC_FIELD",
     0x10: "TAP_DETECTOR",
     0x11: "STEP_COUNTER",
@@ -226,8 +236,10 @@ REPORTS_DICTIONARY = {
     0x20: "TILT_DETECTOR",
     0x21: "POCKET_DETECTOR",
     0x22: "CIRCLE_DETECTOR",
+    0x23: "HR MONITOR",
     0x28: "ARVR_STABILIZED_ROTATION_VECTOR",
     0x29: "ARVR_STABILIZED_GAME_ROTATION_VECTOR",
+    0x2A: "GYRO INTEGRATED ROTATION VECTOR",
     0xF1: "COMMAND_RESPONSE",
     0xF2: "COMMAND_REQUEST",
     0xF3: "FRS_READ_RESPONSE",
@@ -806,20 +818,15 @@ class BNO08X_I2C:
         except KeyError:
             raise RuntimeError("No raw magnetic report found, is it enabled?") from None
 
-    def tare(self):
+    def tare(self, axis = 7, outputs = 2):
         #Tare the sensor
         self._dbg("BNO08X_I2C : MOTION ENGINE TARE BEING DONE...")
         self._send_ME_cde(ME_TARE_CDE,
             [
-                0, #Perform Tare Now
-                7, #Perform All axis
-                2, #Apply to all motion outputs
-                0, #Reserved
-                0, #Reserved
-                0, # reserved
-                0, # reserved
-                0, # reserved
-                0, # reserved
+                0,					#Perform Tare Now
+                axis,				#Perform All axis (7) by default
+                outputs, 			#Apply to all motion outputs (2) by default
+                0, 0, 0, 0, 0, 0,	#6-11 Reserved
             ]
         )
         self._calibration_complete = True
