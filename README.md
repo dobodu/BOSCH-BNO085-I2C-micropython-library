@@ -88,7 +88,7 @@ Available sensors reports are :
     
 Sensors values can be reached with
 
-    accel_x, accel_y, accel_z = bno.acceleration
+    accel_x, accel_y, accel_z = bno.acc
 
 Roll Tilt and Pancan be obtained with
 
