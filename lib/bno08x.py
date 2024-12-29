@@ -16,7 +16,7 @@ from math import asin, atan2, degrees
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 LIBNAME = "BNO08X"
-LIBVERSION = "1.0.2"
+LIBVERSION = "1.0.3"
 
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
@@ -484,7 +484,8 @@ class BNO08X:
         self._magnetometer_accuracy = 0
         self._wait_for_initialize = True
         self._init_complete = False
-        self._id_read = False		#Initialisation we do not know id
+        self._id_read = False #Initialisation we do not know id
+        self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR #by default can be change with set_quaternion_euler
         # for saving the most recent reading when decoding several packets
         self._readings = {}
         self.initialize()
@@ -571,7 +572,11 @@ class BNO08X:
             if feature_id in self._readings:
                 return
         raise RuntimeError("BNO08X_I2C : ENABLING FEATURE ID : Was not able to enable feature", feature_id)
-        
+
+    def set_quaternion_euler_vector(self, feature_id):
+        self._quaternion_euler_vector = feature_id
+        return
+
     @property
     def ready(self):
         return self._ready
@@ -649,7 +654,8 @@ class BNO08X:
         #A quaternion representing the current rotation vector
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_ROTATION_VECTOR]
+            #return self._readings[BNO_REPORT_ROTATION_VECTOR]
+            return self._readings[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("No quaternion report found, is it enabled?") from None
 
@@ -658,7 +664,8 @@ class BNO08X:
         #A 3-tupple representing the current Pan Tilt and Roll euler angle in degree
         self._process_available_packets()
         try:
-            q = self._readings[BNO_REPORT_ROTATION_VECTOR]
+            # q = self._readings[BNO_REPORT_ROTATION_VECTOR]
+            q = self._readings[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("No quaternion report found, is it enabled?") from None
         
