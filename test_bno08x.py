@@ -13,10 +13,10 @@ import time
 import math
 from bno08x import *
 
-I2C1_SDA = Pin(06)
-I2C1_SCL = Pin(07)
+I2C1_SDA = Pin(03)
+I2C1_SCL = Pin(02)
 
-i2c1 = I2C(1, scl=I2C1_SCL, sda=I2C1_SDA, freq=100000, timeout=200000 )
+i2c1 = I2C(0, scl=I2C1_SCL, sda=I2C1_SDA, freq=100000, timeout=200000 )
 
 bno = BNO08X(i2c1, debug=False)
 print("BNO08x I2C connection : Done\n")
@@ -24,27 +24,27 @@ print("BNO08x I2C connection : Done\n")
 bno.enable_feature(BNO_REPORT_ACCELEROMETER)
 bno.enable_feature(BNO_REPORT_MAGNETOMETER)
 bno.enable_feature(BNO_REPORT_GYROSCOPE)
-bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR)
+bno.set_quaternion_euler_vector(BNO_REPORT_GAME_ROTATION_VECTOR)
 
 print("BNO08x sensors enabling : Done\n")
 
 cpt = 0
 
-
 while True:
     time.sleep(0.5)
     cpt += 1
     print("cpt", cpt)
-    accel_x, accel_y, accel_z = bno.acc  # pylint:disable=no-member
-    print("Acceleration\tX: %0.6f\tY: %0.6f\tZ: %0.6f\tm/s²" % (accel_x, accel_y, accel_z))
-    gyro_x, gyro_y, gyro_z = bno.gyro  # pylint:disable=no-member
-    print("Gyroscope\tX: %0.6f\tY: %0.6f\tZ: %0.6f\trads/s" % (gyro_x, gyro_y, gyro_z))
-    mag_x, mag_y, mag_z = bno.mag  # pylint:disable=no-member
-    print("Magnetometer\tX: %0.6f\tY: %0.6f\tZ: %0.6f\tuT" % (mag_x, mag_y, mag_z))
-    quat_i, quat_j, quat_k, quat_real = bno.quaternion  # pylint:disable=no-member
-    print("Rot Vect Quat\tI: %0.6f\tJ: %0.6f\tK: %0.6f\tReal: %0.6f" % (quat_i, quat_j, quat_k, quat_real))
+    accel_x, accel_y, accel_z = bno.acc
+    print("Acceleration\tX: {:+.3f}\tY: {:+.3f}\tZ: {:+.3f}\tm/s²".format(accel_x, accel_y, accel_z))
+    gyro_x, gyro_y, gyro_z = bno.gyro
+    print("Gyroscope\tX: {:+.3f}\tY: {:+.3f}\tZ: {:+.3f}\trads/s".format(gyro_x, gyro_y, gyro_z))
+    mag_x, mag_y, mag_z = bno.mag
+    print("Magnetometer\tX: {:+.3f}\tY: {:+.3f}\tZ: {:+.3f}\tuT".format(mag_x, mag_y, mag_z))
+    quat_i, quat_j, quat_k, quat_real = bno.quaternion
+    print("Rot Vect Quat\tI: {:+.3f}\tJ: {:+.3f}\tK: {:+.3f}\tReal: {:+.3f}".format(quat_i, quat_j, quat_k, quat_real))
     R, T, P = bno.euler
-    print("Euler Angle\tX: %0.1f\tY: %0.1f\tZ: %0.1f" % (R, T, P))
+    print("Euler Angle\tX: {:+.3f}\tY: {:+.3f}\tZ: {:+.3f}".format(R, T, P))
     print("")
     
     if cpt == 10 :
