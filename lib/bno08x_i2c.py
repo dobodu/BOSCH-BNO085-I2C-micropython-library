@@ -1,28 +1,28 @@
 # BNO08X Micropython I2C Library by Dobodu
 #
 # Adapted from original Adafruit CircuitPyhton library
-#
 # SPDX-FileCopyrightText: Copyright (c) 2020 Bryan Siepert for Adafruit Industries
-#
 # SPDX-License-Identifier: MIT
 #
 # TODO : (From original Library)
 #
 # Calibrated Acceleration (m/s2)
-# Euler Angles   =>   Done
 # Calibration
 # Raw ACCEL, MAG, GYRO
 
 from ustruct import unpack_from, pack_into
 from collections import namedtuple
 from math import asin, atan2, degrees
-import time
+from utime import ticks_ms, sleep_ms, ticks_diff
+
+LIBNAME = "BNO08X"
+LIBVERSION = "1.0.1"
 
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
 
 #Buffer Size
-DATA_BUFFER_SIZE = 512  # Eats ram !
+DATA_BUFFER_SIZE = 1024
 
 # Channel Numbers
 BNO_CHANNEL_SHTP_COMMAND = 0x00
@@ -256,6 +256,10 @@ REPORTS_DICTIONARY = {
     0xFE: "GET_FEATURE_REQUEST",
 }
 
+ACTITITIES = [ "Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still",
+        "Tilting", "Walking", "Running", "OnStairs"]
+
+
 ENABLED_ACTIVITIES = (
     0x1FF  # All activities; 1 bit set for each of 8 activities, + Unknown
 )
@@ -277,130 +281,9 @@ REPORT_ACCURACY_STATUS = [
     "High Accuracy",
 ]
 
-class PacketError(Exception):
-    """Raised when the packet couldnt be parsed"""
+############ PACKET PARSING GENERAL FUNCTIONS ###########################
 
-    pass  # pylint:disable=unnecessary-pass
-
-
-############ PACKET PARSING ###########################
-def _parse_sensor_report_data(report_bytes):
-    """Parses reports with only 16-bit fields"""
-    data_offset = 4  # this may not always be true
-    report_id = report_bytes[0]
-    scalar, count, _report_length = AVAIL_SENSOR_REPORTS[report_id]
-    if report_id in RAW_REPORTS:
-        # raw reports are unsigned
-        format_str = "<H"
-    else:
-        format_str = "<h"
-    results = []
-    accuracy = unpack_from("<B", report_bytes, 2)[0]
-    accuracy &= 0b11
-
-    for _offset_idx in range(count):
-        total_offset = data_offset + (_offset_idx * 2)
-        raw_data = unpack_from(format_str, report_bytes, total_offset)[0]
-        scaled_data = raw_data * scalar
-        results.append(scaled_data)
-    results_tuple = tuple(results)
-
-    return (results_tuple, accuracy)
-
-
-def _parse_step_couter_report(report_bytes):
-    return unpack_from("<H", report_bytes, 8)[0]
-
-
-def _parse_stability_classifier_report(report_bytes):
-    classification_bitfield = unpack_from("<B", report_bytes, 4)[0]
-    return ["Unknown", "On Table", "Stationary", "Stable", "In motion"][
-        classification_bitfield
-    ]
-
-
-# report_id
-# feature_report_id
-# feature_flags
-# change_sensitivity
-# report_interval
-# batch_interval_word
-# sensor_specific_configuration_word
-def _parseGET_FEATURE_RESPONSE_report(report_bytes):
-    return unpack_from("<BBBHIII", report_bytes)
-
-
-# 0 Report ID = 0x1E
-# 1 Sequence number
-# 2 Status
-# 3 Delay
-# 4 Page Number + EOS
-# 5 Most likely state
-# 6-15 Classification (10 x Page Number) + confidence
-def _parse_activity_classifier_report(report_bytes):
-    activities = [
-        "Unknown",
-        "In-Vehicle",  # look
-        "On-Bicycle",  # at
-        "On-Foot",  # all
-        "Still",  # this
-        "Tilting",  # room
-        "Walking",  # for
-        "Running",  # activities
-        "OnStairs",
-    ]
-
-    end_and_page_number = unpack_from("<B", report_bytes, 4)[0]
-    # last_page = (end_and_page_number & 0b10000000) > 0
-    page_number = end_and_page_number & 0x7F
-    most_likely = unpack_from("<B", report_bytes, 5)[0]
-    confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
-
-    classification = {}
-    classification["most_likely"] = activities[most_likely]
-    for idx, raw_confidence in enumerate(confidences):
-        confidence = (10 * page_number) + raw_confidence
-        activity_string = activities[idx]
-        classification[activity_string] = confidence
-    return classification
-
-
-def _parse_shake_report(report_bytes):
-    shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
-    return (shake_bitfield & 0x111) > 0
-
-
-def parse_sensor_id(buffer):
-    #Parse the fields of a product id report
-    if not buffer[0] == SHTP_REPORT_ID_RESPONSE:
-        raise AttributeError("Wrong report id for sensor id: %s" % hex(buffer[0]))
-
-    sw_major = unpack_from("<B", buffer, 2)[0]
-    sw_minor = unpack_from("<B", buffer, 3)[0]
-    sw_patch = unpack_from("<H", buffer, 12)[0]
-    sw_part_number = unpack_from("<I", buffer, 4)[0]
-    sw_build_number = unpack_from("<I", buffer, 8)[0]
-
-    return (sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number)
-
-
-def _parseCOMMAND_REsponse(report_bytes):
-    # CMD response report:
-    # 0 Report ID = 0xF1
-    # 1 Sequence number
-    # 2 Command
-    # 3 Command sequence number
-    # 4 Response sequence number
-    # 5 R0-10 A set of response values. The interpretation of these values is specific
-    # to the response for each command.
-    report_body = unpack_from("<BBBBB", report_bytes)
-    response_values = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
-    return (report_body, response_values)
-
-
-def _insertCOMMAND_REquest_report(
-    command, buffer, next_sequence_number, command_params=None
-):
+def _insertCOMMAND_REquest_report(command, buffer, next_sequence_number, command_params=None):
     if command_params and len(command_params) > 9:
         raise AttributeError(
             "Command request reports can only have up to 9 arguments but %d were given"
@@ -417,34 +300,32 @@ def _insertCOMMAND_REquest_report(
     for idx, param in enumerate(command_params):
         buffer[3 + idx] = param
 
-
-def _report_length(report_id):
-    if report_id < 0xF0:  # it's a sensor report
-        return AVAIL_SENSOR_REPORTS[report_id][2]
-
-    return REPORT_LENGTHS[report_id]
-
-
-def _separate_batch(packet, report_slices):
-    # get first report id, loop up its report length
-    # read that many bytes, parse them
-    next_byte_index = 0
-    while next_byte_index < packet.header.data_length:
-        report_id = packet.data[next_byte_index]
-        required_bytes = _report_length(report_id)
-
-        unprocessed_byte_count = packet.header.data_length - next_byte_index
-
-        # handle incomplete remainder
-        if unprocessed_byte_count < required_bytes:
-            raise RuntimeError("Unprocessable Batch bytes", unprocessed_byte_count)
-        # we have enough bytes to read
-        # add a slice to the list that was passed in
-        report_slice = packet.data[next_byte_index : next_byte_index + required_bytes]
-
-        report_slices.append([report_slice[0], report_slice])
-        next_byte_index = next_byte_index + required_bytes
-
+#Class representing a Hillcrest LaboratorySensor Hub Transport packet Header ONLY
+class Header:
+    
+    def __init__(self, packet_header_bytes, debug=False):
+        self._debug = debug
+        self.header = self.header_from_buffer(packet_header_bytes)
+        
+    def __str__(self):
+        length = self.header.packet_byte_count
+        outstr = "\t\t\t\tHeader:\n"
+        outstr += "\t\t\t\t\tChan Num:\t\t%d (%s)\n" % (
+            self.header.channel_number,
+            CHANNELS_DICTIONARY[self.header.channel_number],
+        )
+        outstr += "\t\t\t\t\tSequ Num:\t\t%d\n" % self.header.sequence_number
+        outstr += "\t\t\t\t\tData Len:\t\t%d\n" % self.header.data_length
+        outstr += "\t\t\t\t\tPack Cnt:\t\t%d" % self.header.packet_byte_count
+        return outstr
+        
+    @classmethod
+    def header_from_buffer(cls, header_bytes):
+        #Creates a `Header` object from a given buffer
+        header_byte_count, channel_number, sequence_number = unpack_from("<HBB", header_bytes)
+        header_byte_count &= ~0x8000
+        data_length = max(0, header_byte_count - 4)
+        return PacketHeader(channel_number, sequence_number, data_length, header_byte_count)
 
 class Packet:
     #A class representing a Hillcrest LaboratorySensor Hub Transport packet
@@ -454,26 +335,26 @@ class Packet:
         self.header = self.header_from_buffer(packet_bytes)
         data_end_index = self.header.data_length + 4
         self.data = packet_bytes[4:data_end_index]
-        
+
     def __str__(self):
         length = self.header.packet_byte_count
-        outstr = "DBG::\nDBG::\t\t\t HEADER:\n"
-        outstr += "DBG::\t\t\t\tData Len: %d\n" % (self.header.data_length)
-        outstr += "DBG::\t\t\t\tChannel: %s (%d)\n" % (
-            CHANNELS_DICTIONARY[self.channel_number],
+        outstr = "\t\t\t\tPacket Header:\n"
+        outstr += "\t\t\t\t\tData Len:\t\t%d\n" % (self.header.data_length)
+        outstr += "\t\t\t\t\tChan Num:\t\t%d (%s)\n" % (
             self.channel_number,
+            CHANNELS_DICTIONARY[self.channel_number],
         )
         if self.channel_number in [
             BNO_CHANNEL_CONTROL,
             BNO_CHANNEL_INPUT_SENSOR_REPORTS,
         ]:
             if self.report_id in REPORTS_DICTIONARY:
-                outstr += "DBG::\t\t\t\tReport Type: %s (0x%x)\n" % (
-                    REPORTS_DICTIONARY[self.report_id],
+                outstr += "\t\t\t\t\tRepo Typ:\t\t0x%x (%s)\n" % (
                     self.report_id,
+                    REPORTS_DICTIONARY[self.report_id], 
                 )
             else:
-                outstr += "DBG::\t\t\t\t**UNKNOWN Report Type **: %s\n" % hex(
+                outstr += "\t\t\t\t\t**UNKNOWN Report Type **: %s\n" % hex(
                     self.report_id
                 )
 
@@ -482,9 +363,9 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[5] in REPORTS_DICTIONARY
             ):
-                outstr += "DBG::\t\t\t\tSensor Report Type: %s(%s)\n" % (
-                    REPORTS_DICTIONARY[self.data[5]],
+                outstr += "\t\t\t\t\tSen Type:\t\t%s(%s)\n" % (
                     hex(self.data[5]),
+                    REPORTS_DICTIONARY[self.data[5]],
                 )
 
             if (
@@ -492,19 +373,18 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[1] in REPORTS_DICTIONARY
             ):
-                outstr += "DBG::\t\t\t\tEnabled Feature: %s(%s)\n" % (
+                outstr += "\t\t\t\t\tEnabled Feature: %s(%s)\n" % (
                     REPORTS_DICTIONARY[self.data[1]],
                     hex(self.data[5]),
                 )
-        outstr += "DBG::\t\t\t\tSequence number: %s\n" % self.header.sequence_number
-        outstr += "DBG::\t\t\t DATA:"
+        outstr += "\t\t\t\t\tSequ Num:\t\t%s\n" % self.header.sequence_number
+        outstr += "\t\t\t\tPacket Data:"
 
         for idx, packet_byte in enumerate(self.data[:length]):
             packet_index = idx + 4
             if (packet_index % 4) == 0:
-                outstr += "\nDBG::\t\t\t\t[0x{:02X}] ".format(packet_index)
+                outstr += "\n\t\t\t\t\t[0x{:02X}]\t".format(packet_index)
             outstr += "0x{:02X} ".format(packet_byte)
-        outstr += "\nDBG::"
 
         return outstr
 
@@ -521,16 +401,10 @@ class Packet:
     @classmethod
     def header_from_buffer(cls, packet_bytes):
         #Creates a `PacketHeader` object from a given buffer
-        packet_byte_count = unpack_from("<H", packet_bytes)[0]
+        packet_byte_count, channel_number, sequence_number = unpack_from("<HBB", packet_bytes)
         packet_byte_count &= ~0x8000
-        channel_number = unpack_from("<B", packet_bytes, 2)[0]
-        sequence_number = unpack_from("<B", packet_bytes, 3)[0]
         data_length = max(0, packet_byte_count - 4)
-
-        header = PacketHeader(
-            channel_number, sequence_number, data_length, packet_byte_count
-        )
-        return header
+        return PacketHeader(channel_number, sequence_number, data_length, packet_byte_count)
 
     @classmethod
     def is_error(cls, header):
@@ -544,34 +418,46 @@ class Packet:
     
     def _dbg(self, *args, **kwargs):
         if self._debug:
-            print("DBG::\t\t", *args, **kwargs)
+            print("DBG:\t",LIBNAME,":\t", *args, **kwargs)
 
+class PacketError(Exception):
+    """Raised when the packet couldnt be parsed"""
+    pass
 
-class BNO08X_I2C:
+class BNO08X:
     #Library for the BNO08x IMUs from Hillcrest Laboratories
 
-    def __init__(self, i2c_bus, address=None, reset_pin=None, debug=False):
+    def __init__(self, i2c, address=None, rst_pin=None, int_pin=None, int_handler=None, debug=False):
         
         self._debug = debug
-        self._i2cbus = i2c_bus
-        self._reset_pin = reset_pin
+        self._i2c = i2c
+        self._reset_pin = rst_pin
+        self._ready = False
         
         #Searching for BNO08x adresses on I2C bus if not specifyed
         if address is None :
-            devices = set(self._i2cbus.scan())
+            devices = set(self._i2c.scan())
             mpus = devices.intersection(set(BNO08X_DEFAULT_ADDRESS))
             nb_of_mpus = len(mpus)
             if nb_of_mpus == 0:
                 raise ValueError("No BNO08x detected")
             elif nb_of_mpus == 1:
                 self._bno_add = mpus.pop()
-                self._dbg("BNO08X_I2C : DEVICE FOUND AT ADDRESS... ",hex(self._bno_add))
+                self._dbg("DEVICE FOUND AT ADDRESS... ",hex(self._bno_add))
+                self._ready = True
             else:
                 raise ValueError("Two BNO08x detected: must specify a device address")
         else :
-            self._bno_add = address    
+            self._bno_add = address
+            
+        if int_pin is not None:
+            self.int_pin = int_pin
+            self.int_handler = int_handler
+            self.int_locked = False
+            int_pin.irq(trigger=int_pin.IRQ_FALLING | int_pin.IRQ_RISING,
+                        handler=self.int_handle)
         
-        self._dbg("BNO08X_I2C : INITIALISATION...")
+        self._dbg("INITIALISATION...")
         self._data_buffer = bytearray(DATA_BUFFER_SIZE)
         self._data_buffer_mv = memoryview(self._data_buffer)
         self._command_buffer = bytearray(12)
@@ -605,18 +491,151 @@ class BNO08X_I2C:
                 if self._check_id():
                     break
             except:  # pylint:disable=bare-except
-                time.sleep(0.5)
+                sleep_ms(500)
         else:
             raise RuntimeError("Could not read ID")
+        
+    def int_handle(self, pin):
+        if not pin.value() and not self.int_locked:
+            self.int_locked = True  # Lock Interrupt
+            buff = "New BNO Message"
+            #if buff is not None:
+            #    self.int_handler(buff)
+        elif pin.value() and self.int_locked:
+            self.int_locked = False  # Unlock interrupt
+
+    #Reset the sensor to an initial unconfigured state
+    def soft_reset(self):
+        self._dbg("SOFT RESETTING...")
+        data = bytearray(1)
+        data[0] = 1
+        _seq = self._send_packet(BNO_CHANNEL_EXE, data)
+        sleep_ms(500)
+        _seq = self._send_packet(BNO_CHANNEL_EXE, data)
+        sleep_ms(500)
+
+        for _i in range(3):
+            try:
+                _packet = self._read_packet()
+            except PacketError:
+                sleep_ms(500)
+        self._dbg("SOFT RESETTING... OK!")
+
+    #Hardware reset the sensor to an initial unconfigured state
+    def hard_reset(self):
+        
+        self._dbg("HARD RESETTING...")
+        if self._reset_pin == None :
+            return
+        from machine import Pin  # pylint:disable=import-outside-toplevel
+
+        self._reset = Pin(self._reset_pin, Pin.OUT)
+        self._reset.value(1)
+        sleep_ms(10)
+        self._reset.value(0)
+        sleep_ms(10)
+        self._reset.value(1)
+        sleep_ms(10)
+        
+    # Enable a given feature of the BNO08x
+    # TODO: add docs for available features
+    # TODO2: I think this should call an fn that imports all the bits for the given feature
+    # so we're not carrying around  stuff for extra features
+    def enable_feature(self, feature_id):
+        self._dbg("ENABLING FEATURE ID...", feature_id)
+        
+        if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
+            set_feature_report = self._get_feature_enable_report(feature_id, sensor_specific_config=ENABLED_ACTIVITIES)
+        else:
+            set_feature_report = self._get_feature_enable_report(feature_id)
+
+        feature_dependency = RAW_REPORTS.get(feature_id, None)
+        # if the feature was enabled it will have a key in the readings dict
+        if feature_dependency and feature_dependency not in self._readings:
+            self._dbg("\tEnabling feature depencency:", feature_dependency)
+            self.enable_feature(feature_dependency)
+
+        self._send_packet(BNO_CHANNEL_CONTROL, set_feature_report)
+        
+        start_time = ticks_ms()
+        while  ticks_diff(ticks_ms(), start_time) < FEATURE_ENABLE_TIMEOUT :
+            self._process_available_packets(max_packets=10)
+            self._dbg("Feature IDs",self._readings)
+            if feature_id in self._readings:
+                return
+        raise RuntimeError("BNO08X_I2C : ENABLING FEATURE ID : Was not able to enable feature", feature_id)
+        
+    @property
+    def ready(self):
+        return self._ready
 
     @property
-    def magnetic(self):
+    def acc(self):
+        #A tuple = acceleration measurements on the X, Y, and Z axes in m/s²
+        self._process_available_packets()
+        try:
+            return self._readings[BNO_REPORT_ACCELEROMETER]
+        except KeyError:
+            raise RuntimeError("No accel report found, is it enabled?") from None
+        
+    @property
+    def acc_raw(self):
+        #Returns the sensor's raw, unscaled value from the accelerometer registers
+        self._process_available_packets()
+        try:
+            raw_acceleration = self._readings[BNO_REPORT_RAW_ACCELEROMETER]
+            return raw_acceleration
+        except KeyError:
+            raise RuntimeError(
+                "No raw acceleration report found, is it enabled?"
+            ) from None
+        
+    @property
+    def acc_linear(self):
+        #A tuple = current linear acceleration values on the X, Y, and Z axes in m/s²
+        self._process_available_packets()
+        try:
+            return self._readings[BNO_REPORT_LINEAR_ACCELERATION]
+        except KeyError:
+            raise RuntimeError("No lin. accel report found, is it enabled?") from None
+
+    @property
+    def gyro(self):
+        #A tuple = Gyro's rotation measurements on the X, Y, and Z axes in rad/s
+        self._process_available_packets()
+        try:
+            return self._readings[BNO_REPORT_GYROSCOPE]
+        except KeyError:
+            raise RuntimeError("No gyro report found, is it enabled?") from None
+
+    @property
+    def gyro_raw(self):
+        #Returns the sensor's raw, unscaled value from the gyro registers
+        self._process_available_packets()
+        try:
+            raw_gyro = self._readings[BNO_REPORT_RAW_GYROSCOPE]
+            return raw_gyro
+        except KeyError:
+            raise RuntimeError("No raw gyro report found, is it enabled?") from None
+
+    @property
+    def mag(self):
         #A tuple of the current magnetic field measurements on the X, Y, and Z axes
         self._process_available_packets()  # decorator?
         try:
             return self._readings[BNO_REPORT_MAGNETOMETER]
         except KeyError:
             raise RuntimeError("No magfield report found, is it enabled?") from None
+
+    @property
+    def mag_raw(self):
+        #Returns the sensor's raw, unscaled value from the magnetometer registers
+        self._process_available_packets()
+        try:
+            raw_magnetic = self._readings[BNO_REPORT_RAW_MAGNETOMETER]
+            return raw_magnetic
+        except KeyError:
+            raise RuntimeError("No raw magnetic report found, is it enabled?") from None
 
     @property
     def quaternion(self):
@@ -653,7 +672,7 @@ class BNO08X_I2C:
         return (Roll, Tilt, Pan)
 
     @property
-    def geomagnetic_quaternion(self):
+    def geomagnetic_quat(self):
         #A quaternion representing the current geomagnetic rotation vector
         self._process_available_packets()
         try:
@@ -664,7 +683,7 @@ class BNO08X_I2C:
             ) from None
 
     @property
-    def game_quaternion(self):
+    def game_quat(self):
         """A quaternion representing the current rotation vector expressed as a quaternion with no
         specific reference for heading, while roll and pitch are referenced against gravity. To
         prevent sudden jumps in heading due to corrections, the `game_quaternion` property is not
@@ -687,26 +706,6 @@ class BNO08X_I2C:
             raise RuntimeError("No steps report found, is it enabled?") from None
 
     @property
-    def linear_acceleration(self):
-        """A tuple representing the current linear acceleration values on the X, Y, and Z
-        axes in meters per second squared"""
-        self._process_available_packets()
-        try:
-            return self._readings[BNO_REPORT_LINEAR_ACCELERATION]
-        except KeyError:
-            raise RuntimeError("No lin. accel report found, is it enabled?") from None
-
-    @property
-    def acceleration(self):
-        """A tuple representing the acceleration measurements on the X, Y, and Z
-        axes in meters per second squared"""
-        self._process_available_packets()
-        try:
-            return self._readings[BNO_REPORT_ACCELEROMETER]
-        except KeyError:
-            raise RuntimeError("No accel report found, is it enabled?") from None
-
-    @property
     def gravity(self):
         """A tuple representing the gravity vector in the X, Y, and Z components
         axes in meters per second squared"""
@@ -715,16 +714,6 @@ class BNO08X_I2C:
             return self._readings[BNO_REPORT_GRAVITY]
         except KeyError:
             raise RuntimeError("No gravity report found, is it enabled?") from None
-
-    @property
-    def gyro(self):
-        """A tuple representing Gyro's rotation measurements on the X, Y, and Z
-        axes in radians per second"""
-        self._process_available_packets()
-        try:
-            return self._readings[BNO_REPORT_GYROSCOPE]
-        except KeyError:
-            raise RuntimeError("No gyro report found, is it enabled?") from None
 
     @property
     def shake(self):
@@ -744,7 +733,7 @@ class BNO08X_I2C:
             raise RuntimeError("No shake report found, is it enabled?") from None
 
     @property
-    def stability_classification(self):
+    def stability_classif(self):
         """Returns the sensor's assessment of it's current stability, one of:
         * "Unknown" - The sensor is unable to classify the current stability
         * "On Table" - The sensor is at rest on a stable surface with very little vibration
@@ -764,7 +753,7 @@ class BNO08X_I2C:
             ) from None
 
     @property
-    def activity_classification(self):
+    def activity_classif(self):
         """Returns the sensor's assessment of the activity that is creating the motions\
         that it is sensing, one of:
         * "Unknown"
@@ -786,41 +775,9 @@ class BNO08X_I2C:
                 "No activity classification report found, is it enabled?"
             ) from None
 
-    @property
-    def raw_acceleration(self):
-        #Returns the sensor's raw, unscaled value from the accelerometer registers
-        self._process_available_packets()
-        try:
-            raw_acceleration = self._readings[BNO_REPORT_RAW_ACCELEROMETER]
-            return raw_acceleration
-        except KeyError:
-            raise RuntimeError(
-                "No raw acceleration report found, is it enabled?"
-            ) from None
-
-    @property
-    def raw_gyro(self):
-        #Returns the sensor's raw, unscaled value from the gyro registers
-        self._process_available_packets()
-        try:
-            raw_gyro = self._readings[BNO_REPORT_RAW_GYROSCOPE]
-            return raw_gyro
-        except KeyError:
-            raise RuntimeError("No raw gyro report found, is it enabled?") from None
-
-    @property
-    def raw_magnetic(self):
-        #Returns the sensor's raw, unscaled value from the magnetometer registers
-        self._process_available_packets()
-        try:
-            raw_magnetic = self._readings[BNO_REPORT_RAW_MAGNETOMETER]
-            return raw_magnetic
-        except KeyError:
-            raise RuntimeError("No raw magnetic report found, is it enabled?") from None
-
     def tare(self, axis = 7, outputs = 2):
         #Tare the sensor
-        self._dbg("BNO08X_I2C : MOTION ENGINE TARE BEING DONE...")
+        self._dbg("MOTION ENGINE TARE BEING DONE...")
         self._send_ME_cde(ME_TARE_CDE,
             [
                 0,					#Perform Tare Now
@@ -833,7 +790,7 @@ class BNO08X_I2C:
 
     def calibration(self):
         #Self-calibrate the sensor
-        self._dbg("BNO08X_I2C : MOTION ENGINE CALIBRATION BEING DONE...")
+        self._dbg("MOTION ENGINE CALIBRATION BEING DONE...")
         self._send_ME_cde(ME_CALIBRATION_CDE,
             [
                 1,  # calibrate accel
@@ -852,7 +809,7 @@ class BNO08X_I2C:
     @property
     def calibration_status(self):
         #Get the status of the self-calibration
-        self._dbg("BNO08X_I2C : MOTION ENGINE GETTING CALIBRATION STATUS...")
+        self._dbg("MOTION ENGINE GETTING CALIBRATION STATUS...")
         self._send_ME_cde(ME_CALIBRATION_CDE,
             [
                 0,  # calibrate accel
@@ -867,6 +824,26 @@ class BNO08X_I2C:
             ]
         )
         return self._magnetometer_accuracy
+    
+    def calibration_save(self):
+        #Save the self-calibration data by sending a DCD save command
+        local_buffer = bytearray(12)
+        _insertCOMMAND_REquest_report(
+            ME_SAVE_DCD_CDE,
+            local_buffer,  # should use self._data_buffer :\ but send_packet don't
+            self._get_report_seq_id(COMMAND_REQUEST),
+        )
+        self._send_packet(BNO_CHANNEL_CONTROL, local_buffer)
+        self._increment_report_seq(COMMAND_REQUEST)
+        
+        start_time = ticks_ms()
+        while ticks_diff(ticks_ms(), start_time) < DEFAULT_TIMEOUT:
+            self._process_available_packets()
+            if self._dcd_saved_at > start_time:
+                return
+        raise RuntimeError("Could not save calibration data")
+    
+    #====== Below are internal function ============
 
     def _send_ME_cde(self, me_cde, subcommand):
         local_buffer = self._command_buffer
@@ -878,37 +855,11 @@ class BNO08X_I2C:
         )
         self._send_packet(BNO_CHANNEL_CONTROL, local_buffer)
         self._increment_report_seq(COMMAND_REQUEST)
-
-        """  start_time = time.ticks_ms()
-        while time.ticks_diff(time.ticks_ms(), start_time) < DEFAULT_TIMEOUT:
-            self._process_available_packets()
-            if self._me_calibration_started_at > start_time:
-                break"""
-
-    def save_calibration_data(self):
-        #Save the self-calibration data by sending a DCD save command
-        local_buffer = bytearray(12)
-        _insertCOMMAND_REquest_report(
-            ME_SAVE_DCD_CDE,
-            local_buffer,  # should use self._data_buffer :\ but send_packet don't
-            self._get_report_seq_id(COMMAND_REQUEST),
-        )
-        self._send_packet(BNO_CHANNEL_CONTROL, local_buffer)
-        self._increment_report_seq(COMMAND_REQUEST)
         
-        start_time = time.ticks_ms()
-        while time.ticks_diff(time.ticks_ms(), start_time) < DEFAULT_TIMEOUT:
-            self._process_available_packets()
-            if self._dcd_saved_at > start_time:
-                return
-        raise RuntimeError("Could not save calibration data")
-
-    ############### private/helper methods ###############
     
     def _process_available_packets(self, max_packets=None):
         processed_count = 0
-        self._dbg("BNO08X_I2C : PROCESSING AVAILABLE PACKETS : Max_packet = ",processed_count,"/",max_packets)
-        self._dbg("")
+        self._dbg("PROCESSING AVAILABLE PACKETS : Max_packet = ",processed_count,"/",max_packets)
         while self._data_ready:
             if max_packets and processed_count > max_packets:
                 return
@@ -919,10 +870,8 @@ class BNO08X_I2C:
                 continue
             self._handle_packet(new_packet)
             processed_count += 1
-            self._dbg("\t Packets processed = ",processed_count)
-            self._dbg("")
-        self._dbg("BNO08X_I2C : PROCESSING AVAILABLE PACKETS : DONE!")
-        self._dbg("")
+            self._dbg("\t Packets processed = ",processed_count)    
+        self._dbg("PROCESSING AVAILABLE PACKETS : DONE!")
 
     def _wait_for_packet_type(self, channel_number, report_id=None, timeout=10000, debug=True):
         if report_id:
@@ -930,14 +879,13 @@ class BNO08X_I2C:
         else:
             report_id_str = ""
         self._dbg("WAITING FOR PACKET on channel", channel_number, report_id_str)
-        self._dbg("")
-        start_time = time.ticks_ms()
-        while time.ticks_diff(time.ticks_ms(), start_time) < timeout :
+        
+        start_time = ticks_ms()
+        while ticks_diff(ticks_ms(), start_time) < timeout :
             new_packet = self._wait_for_packet()
             self._dbg("NEW PACKET : ")
             if self._debug:
                 print(new_packet)
-
             if new_packet.channel_number == channel_number:
                 if report_id:
                     if new_packet.report_id == report_id:
@@ -947,14 +895,12 @@ class BNO08X_I2C:
             if new_packet.channel_number not in (BNO_CHANNEL_EXE, BNO_CHANNEL_SHTP_COMMAND):
                 self._dbg("passing packet to handler for de-slicing")
                 self._handle_packet(new_packet)
-
         raise RuntimeError("Timed out waiting for a packet on channel", channel_number)
 
     def _wait_for_packet(self, timeout=PACKET_READ_TIMEOUT):
         self._dbg("WAITING FOR PACKET")
-        self._dbg("")
-        start_time = time.ticks_ms()
-        while  time.ticks_diff(time.ticks_ms(), start_time) < timeout :
+        start_time = ticks_ms()
+        while  ticks_diff(ticks_ms(), start_time) < timeout :
             if not self._data_ready:
                 print("NOT READY")
                 continue
@@ -969,92 +915,98 @@ class BNO08X_I2C:
         channel = new_packet.channel_number
         seq = new_packet.header.sequence_number
         self._sequence_number[channel] = seq
-
+        
     def _handle_packet(self, packet):
         # split out reports first
-        self._dbg("BNO08X_I2C : HANDLING PACKET")
-        self._dbg("")
+        self._dbg("HANDLING PACKET")
         try:
-            _separate_batch(packet, self._packet_slices)
+            # get first report id, loop up its report length, read that many bytes, parse them
+            next_byte_index = 0
+            while next_byte_index < packet.header.data_length:
+                report_id = packet.data[next_byte_index]
+                if report_id < 0xF0:  # it's a sensor report
+                    required_bytes = AVAIL_SENSOR_REPORTS[report_id][2]
+                else :
+                    required_bytes = REPORT_LENGTHS[report_id]
+                unprocessed_byte_count = packet.header.data_length - next_byte_index
+                # handle incomplete remainder
+                if unprocessed_byte_count < required_bytes:
+                    raise RuntimeError("Unprocessable Batch bytes", unprocessed_byte_count)
+                # we have enough bytes to read so add a slice to the list that was passed in
+                report_slice = packet.data[next_byte_index : next_byte_index + required_bytes]
+                self._packet_slices.append([report_slice[0], report_slice])
+                next_byte_index = next_byte_index + required_bytes
             while len(self._packet_slices) > 0:
-                self._process_report(*self._packet_slices.pop())
+                self._process_report(*self._packet_slices.pop())    
         except Exception as error:
             self._dbg(packet)
             raise error
 
     def _handle_control_report(self, report_id, report_bytes):
-        self._dbg("BNO08X_I2C : CONTROLLING REPORT = ",REPORTS_DICTIONARY[report_id])
-        self._dbg("")
+        self._dbg("CONTROLLING REPORT = ",REPORTS_DICTIONARY[report_id])
+        
         if report_id == SHTP_REPORT_ID_RESPONSE:
-            (sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number) = parse_sensor_id(report_bytes)
+            report_id, sw_major, sw_minor, sw_part_number, sw_build_number, sw_patch = unpack_from("<HBBIIH", report_bytes)
+            if report_id != SHTP_REPORT_ID_RESPONSE:
+                raise AttributeError("Wrong report id for sensor id: %s" % hex(buffer[0]))
             self._dbg("\tFROM PACKET SLICE:")
             self._dbg("\t*** Part Number: %d" % sw_part_number)
             self._dbg("\t*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
-            self._dbg("\tBuild: %d" % (sw_build_number))
-            self._dbg("")
+            self._dbg("\tBuild: %d" % (sw_build_number)) 
 
         if report_id == GET_FEATURE_RESPONSE:
-            get_feature_report = _parseGET_FEATURE_RESPONSE_report(report_bytes)
-            _report_id, feature_report_id, *_remainder = get_feature_report
-            self._dbg("\t Report Id ",_report_id)
-            self._dbg("\t Feature Report Id ",feature_report_id)
-            self._readings[feature_report_id] = INITIAL_REPORTS.get(
-                feature_report_id, (0.0, 0.0, 0.0)
-            )
-            self._dbg("\t Readings ",self._readings)
-            self._dbg("")
-            
+            # report_id, feature_report_id, feature_flags, change_sensitivity, report_interval
+            # batch_interval_word, sensor_specific_configuration_word
+            _report_id, feature_report_id, *_remainder = unpack_from("<BBBHIII", report_bytes)
+            self._readings[feature_report_id] = INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0))
+            if self._debug :
+                outstr = "\t\t\t\t\tReport Id   \t\t%d" % _report_id
+                outstr += "\n\t\t\t\t\tFeat Rep. Id\t\t%d" % feature_report_id
+                outstr += "\n\t\t\t\t\tReadings    \t\t%s" % str(self._readings)
+                print(outstr)
         if report_id == COMMAND_RESPONSE:
-            self._handleCOMMAND_REsponse(report_bytes)
+            self._handle_command_response(report_bytes)
 
-    def _handleCOMMAND_REsponse(self, report_bytes):
-        (report_body, response_values) = _parseCOMMAND_REsponse(report_bytes)
-
-        (
-            _report_id,
-            _seq_number,
-            command,
-            _command_seq_number,
-            _response_seq_number,
-        ) = report_body
-
-        # status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved) = response_values
-        command_status, *_rest = response_values
+    def _handle_command_response(self, report_bytes):
+        # CMD response report:
+        # 0 Report ID = 0xF1, # 1 Sequence number, # 2 Command, # 3 Command sequence number, # 4 Response sequence number
+        # 5 R0-10 A set of response values. The interpretation of these values is specific to the response for each command.
+        # status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response_values
+        _report_id, _seq_number, command, _command_seq_number, _response_seq_number, = unpack_from("<BBBBB", report_bytes)
+        command_status, *_rest = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
 
         if command == ME_CALIBRATION_CDE and command_status == 0:
-            self._me_calibration_started_at = time.ticks_ms()
+            self._me_calibration_started_at = ticks_ms()
 
         if command == ME_SAVE_DCD_CDE:
             if command_status == 0:
-                self._dcd_saved_at = time.ticks_ms()
+                self._dcd_saved_at = ticks_ms()
             else:
                 raise RuntimeError("Unable to save calibration data")
 
     def _process_report(self, report_id, report_bytes):
+        self._dbg("PROCESSING REPORTS")
         if report_id >= 0xF0:
-            self._dbg("BNO08X_I2C : PROCESSING REPORT...")
-            self._dbg("")
             self._handle_control_report(report_id, report_bytes)
             return
         
-        self._dbg("\tProcessing report:", REPORTS_DICTIONARY[report_id])
-        
         if self._debug:
-            outstr = ""
+            outstr = "\t\t\t\tProcessing %s report" % REPORTS_DICTIONARY[report_id]
             for idx, packet_byte in enumerate(report_bytes):
                 packet_index = idx
                 if (packet_index % 4) == 0:
-                    outstr += "\nDBG::\t\t[0x{:02X}] ".format(packet_index)
+                    outstr += "\n\t\t\t\t\t[0x{:02X}] ".format(packet_index)
                 outstr += "0x{:02X} ".format(packet_byte)
-            self._dbg(outstr)
-            self._dbg("")
+            print(outstr) 
 
         if report_id == BNO_REPORT_STEP_COUNTER:
-            self._readings[report_id] = _parse_step_couter_report(report_bytes)
+            self._readings[report_id] = unpack_from("<H", report_bytes, 8)          
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
-            shake_detected = _parse_shake_report(report_bytes)
+            shake_bitfield = unpack_from("<H", report_bytes, 4)
+            shake_detected = (shake_bitfield & 0x111) > 0
+            
             # shake not previously detected - auto cleared by 'shake' property
             try:
                 if not self._readings[BNO_REPORT_SHAKE_DETECTOR]:
@@ -1064,26 +1016,53 @@ class BNO08X_I2C:
             return
 
         if report_id == BNO_REPORT_STABILITY_CLASSIFIER:
-            stability_classification = _parse_stability_classifier_report(report_bytes)
+            classification_bitfield = unpack_from("<B", report_bytes, 4)
+            stability_classification = ["Unknown", "On Table", "Stationary", "Stable", "In motion"][classification_bitfield]
             self._readings[BNO_REPORT_STABILITY_CLASSIFIER] = stability_classification
             return
 
-        if report_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            activity_classification = _parse_activity_classifier_report(report_bytes)
+        if report_id == BNO_REPORT_ACTIVITY_CLASSIFIER:        
+            # 0 Report ID = 0x1E, # 1 Sequence number, # 2 Status, 3 Delay, 4 Page Number + EOS
+            # 5 Most likely state, # 6-15 Classification (10 x Page Number) + confidence
+            end_and_page_number, most_likely = unpack_from("<BB", report_bytes, 4)
+            # last_page = (end_and_page_number & 0b10000000) > 0
+            page_number = end_and_page_number & 0x7F
+            confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
+            activity_classification = {}
+            activity_classification["most_likely"] = ACTITITIES[most_likely]
+            for idx, raw_confidence in enumerate(confidences):
+                confidence = (10 * page_number) + raw_confidence
+                activity_string = ACTITITIES[idx]
+                activity_classification[activity_string] = confidence
             self._readings[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
         
-        sensor_data, accuracy = _parse_sensor_report_data(report_bytes)
-        
-        self._dbg("Sensor data ",sensor_data,"Accuracy ", accuracy)
-        self._dbg("")
-        
+        #General case, parsing the report data with only 16-bit fields
+        data_offset = 4  # this may not always be true
+        report_id = report_bytes[0]
+        scalar, count, _report_length = AVAIL_SENSOR_REPORTS[report_id]
+        if report_id in RAW_REPORTS: # raw reports are unsigned
+            format_str = "<H"
+        else:
+            format_str = "<h"
+        results = []
+        accuracy = unpack_from("<B", report_bytes, 2)[0]
+        accuracy &= 0b11
+
+        for _offset_idx in range(count):
+            total_offset = data_offset + (_offset_idx * 2)
+            raw_data = unpack_from(format_str, report_bytes, total_offset)[0]
+            scaled_data = raw_data * scalar
+            results.append(scaled_data)
+        sensor_data = tuple(results)
+        if self._debug:
+            outstr = "\t\t\t\tReading for %s %s Accuracy %d" % (REPORTS_DICTIONARY[report_id], str(sensor_data), accuracy)
+            print(outstr)
         if report_id == BNO_REPORT_MAGNETOMETER:
             self._magnetometer_accuracy = accuracy
         # TODO: FIXME; Sensor reports are batched in a LIFO which means that multiple reports
         # for the same type will end with the oldest/last being kept and the other
         # newer reports thrown away
-        
         self._readings[report_id] = sensor_data
 
     # TODO: Make this a Packet creation
@@ -1094,41 +1073,10 @@ class BNO08X_I2C:
         set_feature_report[1] = feature_id
         pack_into("<I", set_feature_report, 5, report_interval)
         pack_into("<I", set_feature_report, 13, sensor_specific_config)
-
         return set_feature_report
 
-    # TODO: add docs for available features
-    # TODO2: I think this should call an fn that imports all the bits for the given feature
-    # so we're not carrying around  stuff for extra features
-    def enable_feature(self, feature_id):
-        #Used to enable a given feature of the BNO08x
-        self._dbg("BNO08X_I2C : ENABLING FEATURE ID...", feature_id)
-        self._dbg("")
-        if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            set_feature_report = self._get_feature_enable_report(feature_id, sensor_specific_config=ENABLED_ACTIVITIES)
-        else:
-            set_feature_report = self._get_feature_enable_report(feature_id)
-
-        feature_dependency = RAW_REPORTS.get(feature_id, None)
-        # if the feature was enabled it will have a key in the readings dict
-        if feature_dependency and feature_dependency not in self._readings:
-            self._dbg("\tEnabling feature depencency:", feature_dependency)
-            self.enable_feature(feature_dependency)
-
-        self._send_packet(BNO_CHANNEL_CONTROL, set_feature_report)
-        
-        start_time = time.ticks_ms()
-        while  time.ticks_diff(time.ticks_ms(), start_time) < FEATURE_ENABLE_TIMEOUT :
-            self._process_available_packets(max_packets=10)
-            self._dbg("Feature IDs",self._readings)
-            if feature_id in self._readings:
-                return
-        raise RuntimeError("BNO08X_I2C : ENABLING FEATURE ID : Was not able to enable feature", feature_id)
-
     def _check_id(self):
-        
-        self._dbg("BNO08X_I2C : CHECKING ID...")
-        self._dbg("")
+        self._dbg("CHECKING ID...")
         if self._id_read:
             return True
         data = bytearray(2)
@@ -1144,44 +1092,24 @@ class BNO08X_I2C:
             if sensor_id:
                 self._id_read = True
                 return True
-            self._dbg("BNO08X_I2C : CHECKING ID : Packet didn't have sensor ID report, trying again")
-
+            self._dbg("CHECKING ID : Packet didn't have sensor ID report, trying again")
         return False
 
     def _parse_sensor_id(self):
         self._dbg("PARSE SENSOR ID : BUFFER DATA IS : ", self._data_buffer[4])
         if not self._data_buffer[4] == SHTP_REPORT_ID_RESPONSE:
             return None
-
-        sw_major = self._get_data(2, "<B")
-        sw_minor = self._get_data(3, "<B")
-        sw_patch = self._get_data(12, "<H")
-        sw_part_number = self._get_data(4, "<I")
-        sw_build_number = self._get_data(8, "<I")
-
-        self._dbg("")
+        sw_major, sw_minor, sw_part_number, sw_build_number, sw_patch = unpack_from("<BBIIH", self._data_buffer, 6)
         self._dbg("\t*** Part Number: %d" % sw_part_number)
         self._dbg("\t*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
         self._dbg("\t*** Build: %d" % (sw_build_number))
-        self._dbg("")
         # TODO: this is only one of the numbers!
         return sw_part_number
 
-    def _dbg(self, *args, **kwargs):
-        if self._debug:
-            print("DBG::\t\t", *args, **kwargs)
-
-    def _get_data(self, index, fmt_string):
-        # index arg is not including header, so add 4 into data buffer
-        data_index = index + 4
-        return unpack_from(fmt_string, self._data_buffer, data_index)[0]
-
-    # pylint:disable=no-self-use
     @property
     def _data_ready(self):
         #Check if there is available data on the I2C bus
         header = self._read_header()
-
         if header.channel_number > 5:
             self._dbg("channel number out of range:", header.channel_number)
         if header.packet_byte_count == 0x7FFF:
@@ -1191,49 +1119,13 @@ class BNO08X_I2C:
             ready = False
         else:
             ready = header.data_length > 0
-
         self._dbg("BNO08X_I2C_DATA READY : ", ready)
-        self._dbg("")
-        
         return ready
 
-    def hard_reset(self):
-        #Hardware reset the sensor to an initial unconfigured state
-        self._dbg("BNO08X_I2C : HARD RESETTING...")
-        if self._reset_pin == None :
-            return
-        from machine import Pin  # pylint:disable=import-outside-toplevel
-
-        self._reset = Pin(self._reset_pin, Pin.OUT)
-        self._reset.value(1)
-        time.sleep(0.01)
-        self._reset.value(0)
-        time.sleep(0.01)
-        self._reset.value(1)
-        time.sleep(0.01)
-
-    def soft_reset(self):
-        #Reset the sensor to an initial unconfigured state
-        self._dbg("BNO08X_I2C : SOFT RESETTING...")
-        data = bytearray(1)
-        data[0] = 1
-        _seq = self._send_packet(BNO_CHANNEL_EXE, data)
-        time.sleep(0.5)
-        _seq = self._send_packet(BNO_CHANNEL_EXE, data)
-        time.sleep(0.5)
-
-        for _i in range(3):
-            try:
-                _packet = self._read_packet()
-            except PacketError:
-                time.sleep(0.5)
-        self._dbg("")
-        self._dbg("BNO08X_I2C : SOFT RESETTING... OK!")
-        self._dbg("")
-        # all is good!
-
+    #Send a packet = header + packet data
     def _send_packet(self, channel, data):
 
+        self._dbg("SENDING PACKET...")
         #Start to make the packet header, 2 bytes for size, 1 byte for channel and 1 byte for sequence
         data_length = len(data)
         write_length = data_length + 4
@@ -1245,21 +1137,19 @@ class BNO08X_I2C:
             self._data_buffer[4 + idx] = send_byte
         packet = Packet(self._data_buffer)
         
-        self._dbg("BNO08X_I2C : SENDING PACKET...")
         if self._debug:
             print(packet)
         
         #Send the packet to the I2C bus and increase the sequence number
-        self._i2cbus.writeto(self._bno_add, self._data_buffer[0:write_length])
+        self._i2c.writeto(self._bno_add, self._data_buffer[0:write_length])
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
         
         return self._sequence_number[channel]
 
+    #Read a packet = header + packet data
     def _read_packet(self):
         
-        #Read a packet packet = header + packet data
-        self._dbg("BNO08X_I2C : READING PACKET...")
-        self._dbg("")
+        self._dbg("READING PACKET...")
                 
         #Header is 4 bytes long (2 bytes size, 1 byte for channel number and 1 byte for sequence number)
         #Buffer is declared in BNO08X class : self._data_buffer = bytearray(512)
@@ -1267,10 +1157,7 @@ class BNO08X_I2C:
         #I2C adress is declared in class : self._bno_add
         
         #Begin with reading a header ==> Expecting a header (4 bytes)
-        self._i2cbus.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
-        
-        self._dbg("\tself._data_buffer[0:4] contains : ", self._data_buffer[0:4])
-        self._dbg("")
+        self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
         
         #Decode the packet header and update sequence number
         header = Packet.header_from_buffer(self._data_buffer[0:4])
@@ -1282,16 +1169,13 @@ class BNO08X_I2C:
         
         if packet_byte_count == 0:
             self._dbg("\tSKIPPING NO PACKETS AVAILABLE IN bno08x_i2c._read_packet")
-            self._dbg("")
             raise PacketError("No packet available")
 
-        self._dbg("\tChannel", channel_number, "has", data_length, "bytes available to read")
-
         #Then we read the packet data to the buffer image
-        self._i2cbus.readfrom_into(self._bno_add, self._data_buffer_mv[0:packet_byte_count])
+        self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:packet_byte_count])
 
         #Then process the packet 
-        new_packet = Packet(self._data_buffer[0:packet_byte_count])#,True)
+        new_packet = Packet(self._data_buffer[0:packet_byte_count])
         
         if self._debug:
             print(new_packet)
@@ -1303,18 +1187,17 @@ class BNO08X_I2C:
     def _read_header(self):
         
         #Read only a packet Header
-        self._dbg("BNO08X_I2C : READING HEADER...")
-        self._dbg("")
+        self._dbg("READING HEADER...")
         
         #Reads the first 4 bytes available as a header ==> Expecting a header
-        self._i2cbus.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
+        self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
         packet_header = Packet.header_from_buffer(self._data_buffer[0:4])
+        header = Header(self._data_buffer[0:4])
         
-        self._dbg("\t",packet_header)
-        self._dbg("")
+        if self._debug:
+            print(header)
         
         return packet_header
-    
 
     def _increment_report_seq(self, report_id):
         current = self._two_ended_sequence_numbers.get(report_id, 0)
@@ -1322,3 +1205,7 @@ class BNO08X_I2C:
 
     def _get_report_seq_id(self, report_id):
         return self._two_ended_sequence_numbers.get(report_id, 0)
+  
+    def _dbg(self, *args, **kwargs):
+        if self._debug:
+            print("DBG:\t",LIBNAME,":\t", *args, **kwargs)
