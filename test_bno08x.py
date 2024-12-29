@@ -11,15 +11,14 @@
 from machine import I2C, Pin
 import time
 import math
-from bno08x_i2c import *
+from bno08x import *
 
-I2C1_SDA = Pin(26)
-I2C1_SCL = Pin(27)
+I2C1_SDA = Pin(06)
+I2C1_SCL = Pin(07)
 
 i2c1 = I2C(1, scl=I2C1_SCL, sda=I2C1_SDA, freq=100000, timeout=200000 )
-print("I2C Device found at address : ",i2c1.scan(),"\n")
 
-bno = BNO08X_I2C(i2c1, debug=False)
+bno = BNO08X(i2c1, debug=False)
 print("BNO08x I2C connection : Done\n")
 
 bno.enable_feature(BNO_REPORT_ACCELEROMETER)
@@ -36,11 +35,11 @@ while True:
     time.sleep(0.5)
     cpt += 1
     print("cpt", cpt)
-    accel_x, accel_y, accel_z = bno.acceleration  # pylint:disable=no-member
+    accel_x, accel_y, accel_z = bno.acc  # pylint:disable=no-member
     print("Acceleration\tX: %0.6f\tY: %0.6f\tZ: %0.6f\tm/s²" % (accel_x, accel_y, accel_z))
     gyro_x, gyro_y, gyro_z = bno.gyro  # pylint:disable=no-member
     print("Gyroscope\tX: %0.6f\tY: %0.6f\tZ: %0.6f\trads/s" % (gyro_x, gyro_y, gyro_z))
-    mag_x, mag_y, mag_z = bno.magnetic  # pylint:disable=no-member
+    mag_x, mag_y, mag_z = bno.mag  # pylint:disable=no-member
     print("Magnetometer\tX: %0.6f\tY: %0.6f\tZ: %0.6f\tuT" % (mag_x, mag_y, mag_z))
     quat_i, quat_j, quat_k, quat_real = bno.quaternion  # pylint:disable=no-member
     print("Rot Vect Quat\tI: %0.6f\tJ: %0.6f\tK: %0.6f\tReal: %0.6f" % (quat_i, quat_j, quat_k, quat_real))
@@ -50,4 +49,3 @@ while True:
     
     if cpt == 10 :
         bno.tare
-    
