@@ -4,6 +4,8 @@ Micropython I2C library for 9 dof BOSCH BNO08X sensors ( BNO080, BNO085, aso )
 100% inspired by the original Adafruit Circuitpython I2C library for BNO08X
 Copyright (c) 2020 Bryan Siepert for Adafruit Industries
 
+THIS LIBRARY IS WORKING ON RASPBERRY PICO AND ALSO ON ESP32-S3*
+*ESP32 S3 need a firmware compiled with ESP-IDF 5.3.2 (maybe 5.3.1 will also work)
 
 Need an I2C setup like
 
