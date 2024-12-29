@@ -354,7 +354,7 @@ class Packet:
                     REPORTS_DICTIONARY[self.report_id], 
                 )
             else:
-                outstr += "\t\t\t\t\t**UNKNOWN Report Type **: %s\n" % hex(
+                outstr += "\t\t\t\t\t*Repo Typ:\t\t0x%x (Unkown)\n" % (
                     self.report_id
                 )
 
@@ -363,7 +363,7 @@ class Packet:
                 and len(self.data) >= 6
                 and self.data[5] in REPORTS_DICTIONARY
             ):
-                outstr += "\t\t\t\t\tSen Type:\t\t%s(%s)\n" % (
+                outstr += "\t\t\t\t\tSen Type:\t\t%s (%s)\n" % (
                     hex(self.data[5]),
                     REPORTS_DICTIONARY[self.data[5]],
                 )
@@ -859,7 +859,7 @@ class BNO08X:
     
     def _process_available_packets(self, max_packets=None):
         processed_count = 0
-        self._dbg("PROCESSING AVAILABLE PACKETS : Max_packet = ",processed_count,"/",max_packets)
+        self._dbg("PROCESSING AVAILABLE PACKETS...",processed_count,"/",max_packets)
         while self._data_ready:
             if max_packets and processed_count > max_packets:
                 return
@@ -918,7 +918,7 @@ class BNO08X:
         
     def _handle_packet(self, packet):
         # split out reports first
-        self._dbg("HANDLING PACKET")
+        self._dbg("HANDLING PACKET...")
         try:
             # get first report id, loop up its report length, read that many bytes, parse them
             next_byte_index = 0
@@ -940,6 +940,7 @@ class BNO08X:
                 self._process_report(*self._packet_slices.pop())    
         except Exception as error:
             self._dbg(packet)
+            print("coucou2")
             raise error
 
     def _handle_control_report(self, report_id, report_bytes):
@@ -985,7 +986,7 @@ class BNO08X:
                 raise RuntimeError("Unable to save calibration data")
 
     def _process_report(self, report_id, report_bytes):
-        self._dbg("PROCESSING REPORTS")
+        self._dbg("PROCESSING REPORTS...")
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
@@ -1159,7 +1160,7 @@ class BNO08X:
         #Begin with reading a header ==> Expecting a header (4 bytes)
         self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
         
-        #Decode the packet header and update sequence number
+        #Decode the  and update sequence number
         header = Packet.header_from_buffer(self._data_buffer[0:4])
         packet_byte_count = header.packet_byte_count
         channel_number = header.channel_number
