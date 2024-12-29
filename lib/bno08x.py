@@ -947,7 +947,6 @@ class BNO08X:
                 self._process_report(*self._packet_slices.pop())    
         except Exception as error:
             self._dbg(packet)
-            print("coucou2")
             raise error
 
     def _handle_control_report(self, report_id, report_bytes):
