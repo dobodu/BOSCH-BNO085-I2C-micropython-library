@@ -16,13 +16,13 @@ from math import asin, atan2, degrees
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 LIBNAME = "BNO08X"
-LIBVERSION = "1.0.4"
+LIBVERSION = "1.0.5"
 
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
 
 #Buffer Size
-DATA_BUFFER_SIZE = 1024
+DATA_BUFFER_SIZE = 4096
 
 # Channel Numbers
 BNO_CHANNEL_SHTP_COMMAND = 0x00
@@ -966,6 +966,7 @@ class BNO08X:
                 # handle incomplete remainder
                 if unprocessed_byte_count < required_bytes:
                     self._dbg("Unprocessable Batch bytes : Skipping...",unprocessed_byte_count, "bytes")
+                    break
                 # we have enough bytes to read so add a slice to the list that was passed in
                 report_slice = packet.data[next_byte_index : next_byte_index + required_bytes]
                 self._packet_slices.append([report_slice[0], report_slice])
