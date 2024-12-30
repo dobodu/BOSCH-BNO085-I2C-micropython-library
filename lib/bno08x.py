@@ -16,7 +16,7 @@ from math import asin, atan2, degrees
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 LIBNAME = "BNO08X"
-LIBVERSION = "1.0.3"
+LIBVERSION = "1.0.4"
 
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
@@ -109,12 +109,42 @@ BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR = 0x28
 BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR = 0x29
 BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR = 0x2A
 
-#Timeouts (ms) and intervals (us)
-DEFAULT_REPORT_INTERVAL = 50000
+#Timeouts (ms)
 QUAT_READ_TIMEOUT = 500
 PACKET_READ_TIMEOUT = 2000 
 FEATURE_ENABLE_TIMEOUT = 2000
 DEFAULT_TIMEOUT = 2000
+
+#Reports Frequencies (Hz)
+DEFAULT_REPORT_FREQ = 20
+AVAIL_REPORT_FREQ = {
+    BNO_REPORT_ACCELEROMETER: 20,
+    BNO_REPORT_GYROSCOPE: 20,
+    BNO_REPORT_MAGNETOMETER: 20,
+    BNO_REPORT_LINEAR_ACCELERATION: 20, 
+    BNO_REPORT_ROTATION_VECTOR: 10,
+    BNO_REPORT_GRAVITY: 10,
+    BNO_REPORT_GAME_ROTATION_VECTOR: 10,
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: 10,
+    BNO_REPORT_PRESSURE : 2,
+    BNO_REPORT_AMBIENT_LIGHT : 10,
+    BNO_REPORT_HUMIDITY  : 2,
+    BNO_REPORT_PROXIMITY : 10,
+    BNO_REPORT_TEMPERATURE  : 2,
+    BNO_REPORT_STEP_COUNTER: 5,
+    BNO_REPORT_SHAKE_DETECTOR: 20,
+    BNO_REPORT_STABILITY_CLASSIFIER: 2,
+    BNO_REPORT_ACTIVITY_CLASSIFIER: 2,
+    BNO_REPORT_RAW_ACCELEROMETER: 20,
+    BNO_REPORT_RAW_GYROSCOPE: 20,
+    BNO_REPORT_RAW_MAGNETOMETER: 20,
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: 20,
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER : 20,
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: 10,
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: 10,
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: 10,
+}
+
 
 #Quaternions and precisions
 QUAT_Q_POINT = 0x05 # 14 by default
@@ -290,23 +320,6 @@ REPORT_ACCURACY_STATUS = [
 
 ############ PACKET PARSING GENERAL FUNCTIONS ###########################
 
-def _insertCOMMAND_REquest_report(command, buffer, next_sequence_number, command_params=None):
-    if command_params and len(command_params) > 9:
-        raise AttributeError(
-            "Command request reports can only have up to 9 arguments but %d were given"
-            % len(command_params)
-        )
-    for _i in range(12):
-        buffer[_i] = 0
-    buffer[0] = COMMAND_REQUEST
-    buffer[1] = next_sequence_number
-    buffer[2] = command
-    if command_params is None:
-        return
-
-    for idx, param in enumerate(command_params):
-        buffer[3 + idx] = param
-
 #Class representing a Hillcrest LaboratorySensor Hub Transport packet Header ONLY
 class Header:
     
@@ -438,7 +451,7 @@ class BNO08X:
         
         self._debug = debug
         self._i2c = i2c
-        self._reset_pin = rst_pin
+        self._rst_pin = rst_pin
         self._ready = False
         
         #Searching for BNO08x adresses on I2C bus if not specifyed
@@ -465,14 +478,14 @@ class BNO08X:
                         handler=self.int_handle)
         
         self._dbg("INITIALISATION...")
-        self._data_buffer = bytearray(DATA_BUFFER_SIZE)
-        self._data_buffer_mv = memoryview(self._data_buffer)
-        self._command_buffer = bytearray(12)
+        self._buffer = bytearray(DATA_BUFFER_SIZE)
+        self._buffer_mv = memoryview(self._buffer)
+        self._cde_buffer = bytearray(12)
         self._packet_slices = []
 
         # TODO: this is wrong there should be one per channel per direction
-        self._sequence_number = [0, 0, 0, 0, 0, 0]
-        self._two_ended_sequence_numbers = {
+        self._seq_nb = [0, 0, 0, 0, 0, 0]
+        self._sr_seq_nb = {
             "send": {},  # holds the next seq number to send with the report id as a key
             "receive": {},
         }
@@ -533,11 +546,11 @@ class BNO08X:
     def hard_reset(self):
         
         self._dbg("HARD RESETTING...")
-        if self._reset_pin == None :
+        if self._rst_pin == None :
             return
         from machine import Pin  # pylint:disable=import-outside-toplevel
 
-        self._reset = Pin(self._reset_pin, Pin.OUT)
+        self._reset = Pin(self._rst_pin, Pin.OUT)
         self._reset.value(1)
         sleep_ms(10)
         self._reset.value(0)
@@ -545,18 +558,23 @@ class BNO08X:
         self._reset.value(1)
         sleep_ms(10)
         
-    # Enable a given feature of the BNO08x
+    # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
     # TODO: add docs for available features
-    # TODO2: I think this should call an fn that imports all the bits for the given feature
-    # so we're not carrying around  stuff for extra features
-    def enable_feature(self, feature_id):
+    # TODO2: Function does the minimum and should first imports all the bits for the given feature
+    # before writing (ex : Feature flags and so on...
+    def enable_feature(self, feature_id, freq=None):
         self._dbg("ENABLING FEATURE ID...", feature_id)
         
+        set_feature_report = bytearray(17)
+        set_feature_report[0] = SET_FEATURE_COMMAND
+        set_feature_report[1] = feature_id
+        if freq != None :
+            AVAIL_REPORT_FREQ[feature_id] = freq
+        report_interval = int(1_000_000 / AVAIL_REPORT_FREQ[feature_id]) #delay in micro_s
+        pack_into("<I", set_feature_report, 5, report_interval)
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            set_feature_report = self._get_feature_enable_report(feature_id, sensor_specific_config=ENABLED_ACTIVITIES)
-        else:
-            set_feature_report = self._get_feature_enable_report(feature_id)
-
+            pack_into("<I", set_feature_report, 13, ENABLED_ACTIVITIES)
+  
         feature_dependency = RAW_REPORTS.get(feature_id, None)
         # if the feature was enabled it will have a key in the readings dict
         if feature_dependency and feature_dependency not in self._readings:
@@ -576,6 +594,8 @@ class BNO08X:
     def set_quaternion_euler_vector(self, feature_id):
         self._quaternion_euler_vector = feature_id
         return
+
+    #================Below are class properties=======================
 
     @property
     def ready(self):
@@ -842,13 +862,13 @@ class BNO08X:
     def calibration_save(self):
         #Save the self-calibration data by sending a DCD save command
         local_buffer = bytearray(12)
-        _insertCOMMAND_REquest_report(
+        self._insert_cde_request_report(
             ME_SAVE_DCD_CDE,
-            local_buffer,  # should use self._data_buffer :\ but send_packet don't
-            self._get_report_seq_id(COMMAND_REQUEST),
+            local_buffer,  # should use self._buffer :\ but send_packet don't
+            self._sr_seq_nb.get(COMMAND_REQUEST, 0), #report_seq_id
         )
         self._send_packet(BNO_CHANNEL_CONTROL, local_buffer)
-        self._increment_report_seq(COMMAND_REQUEST)
+        self._sr_seq_nb[COMMAND_REQUEST] = (self._sr_seq_nb.get(COMMAND_REQUEST, 0) + 1) % 256  #increment sr_seq_nb
         
         start_time = ticks_ms()
         while ticks_diff(ticks_ms(), start_time) < DEFAULT_TIMEOUT:
@@ -860,15 +880,15 @@ class BNO08X:
     #====== Below are internal function ============
 
     def _send_ME_cde(self, me_cde, subcommand):
-        local_buffer = self._command_buffer
-        _insertCOMMAND_REquest_report(
+        local_buffer = self._cde_buffer
+        self._insert_cde_request_report(
             me_cde,
-            self._command_buffer,  # should use self._data_buffer :\ but send_packet don't
-            self._get_report_seq_id(COMMAND_REQUEST),
+            self._cde_buffer,  # should use self._buffer :\ but send_packet don't
+            self._sr_seq_nb.get(COMMAND_REQUEST, 0), #report_seq_id
             subcommand,
         )
         self._send_packet(BNO_CHANNEL_CONTROL, local_buffer)
-        self._increment_report_seq(COMMAND_REQUEST)
+        self._sr_seq_nb[COMMAND_REQUEST] = (self._sr_seq_nb.get(COMMAND_REQUEST, 0) + 1) % 256  #increment sr_seq_nb
         
     
     def _process_available_packets(self, max_packets=None):
@@ -928,7 +948,7 @@ class BNO08X:
     def _update_sequence_number(self, new_packet):
         channel = new_packet.channel_number
         seq = new_packet.header.sequence_number
-        self._sequence_number[channel] = seq
+        self._seq_nb[channel] = seq
         
     def _handle_packet(self, packet):
         # split out reports first
@@ -945,7 +965,7 @@ class BNO08X:
                 unprocessed_byte_count = packet.header.data_length - next_byte_index
                 # handle incomplete remainder
                 if unprocessed_byte_count < required_bytes:
-                    raise RuntimeError("Unprocessable Batch bytes", unprocessed_byte_count)
+                    self._dbg("Unprocessable Batch bytes : Skipping...",unprocessed_byte_count, "bytes")
                 # we have enough bytes to read so add a slice to the list that was passed in
                 report_slice = packet.data[next_byte_index : next_byte_index + required_bytes]
                 self._packet_slices.append([report_slice[0], report_slice])
@@ -1079,16 +1099,6 @@ class BNO08X:
         # newer reports thrown away
         self._readings[report_id] = sensor_data
 
-    # TODO: Make this a Packet creation
-    @staticmethod
-    def _get_feature_enable_report(feature_id, report_interval=DEFAULT_REPORT_INTERVAL, sensor_specific_config=0):
-        set_feature_report = bytearray(17)
-        set_feature_report[0] = SET_FEATURE_COMMAND
-        set_feature_report[1] = feature_id
-        pack_into("<I", set_feature_report, 5, report_interval)
-        pack_into("<I", set_feature_report, 13, sensor_specific_config)
-        return set_feature_report
-
     def _check_id(self):
         self._dbg("CHECKING ID...")
         if self._id_read:
@@ -1110,10 +1120,10 @@ class BNO08X:
         return False
 
     def _parse_sensor_id(self):
-        self._dbg("PARSE SENSOR ID : BUFFER DATA IS : ", self._data_buffer[4])
-        if not self._data_buffer[4] == SHTP_REPORT_ID_RESPONSE:
+        self._dbg("PARSE SENSOR ID : BUFFER DATA IS : ", self._buffer[4])
+        if not self._buffer[4] == SHTP_REPORT_ID_RESPONSE:
             return None
-        sw_major, sw_minor, sw_part_number, sw_build_number, sw_patch = unpack_from("<BBIIH", self._data_buffer, 6)
+        sw_major, sw_minor, sw_part_number, sw_build_number, sw_patch = unpack_from("<BBIIH", self._buffer, 6)
         self._dbg("\t*** Part Number: %d" % sw_part_number)
         self._dbg("\t*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
         self._dbg("\t*** Build: %d" % (sw_build_number))
@@ -1143,22 +1153,22 @@ class BNO08X:
         #Start to make the packet header, 2 bytes for size, 1 byte for channel and 1 byte for sequence
         data_length = len(data)
         write_length = data_length + 4
-        pack_into("<H", self._data_buffer, 0, write_length)
-        self._data_buffer[2] = channel
-        self._data_buffer[3] = self._sequence_number[channel]
+        pack_into("<H", self._buffer, 0, write_length)
+        self._buffer[2] = channel
+        self._buffer[3] = self._seq_nb[channel]
         #Then add the data         
         for idx, send_byte in enumerate(data):
-            self._data_buffer[4 + idx] = send_byte
-        packet = Packet(self._data_buffer)
+            self._buffer[4 + idx] = send_byte
+        packet = Packet(self._buffer)
         
         if self._debug:
             print(packet)
         
         #Send the packet to the I2C bus and increase the sequence number
-        self._i2c.writeto(self._bno_add, self._data_buffer[0:write_length])
-        self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
+        self._i2c.writeto(self._bno_add, self._buffer[0:write_length])
+        self._seq_nb[channel] = (self._seq_nb[channel] + 1) % 256
         
-        return self._sequence_number[channel]
+        return self._seq_nb[channel]
 
     #Read a packet = header + packet data
     def _read_packet(self):
@@ -1166,36 +1176,33 @@ class BNO08X:
         self._dbg("READING PACKET...")
                 
         #Header is 4 bytes long (2 bytes size, 1 byte for channel number and 1 byte for sequence number)
-        #Buffer is declared in BNO08X class : self._data_buffer = bytearray(512)
+        #Buffer is declared in BNO08X class : self._buffer = bytearray(512)
         #But here we use the memoryimage from this buffer which is declared in BNO08X class
         #I2C adress is declared in class : self._bno_add
         
         #Begin with reading a header ==> Expecting a header (4 bytes)
-        self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
+        self._i2c.readfrom_into(self._bno_add, self._buffer_mv[0:4])
         
         #Decode the  and update sequence number
-        header = Packet.header_from_buffer(self._data_buffer[0:4])
+        header = Packet.header_from_buffer(self._buffer[0:4])
         packet_byte_count = header.packet_byte_count
         channel_number = header.channel_number
         sequence_number = header.sequence_number
         data_length = header.data_length
-        self._sequence_number[channel_number] = sequence_number
+        self._seq_nb[channel_number] = sequence_number
         
         if packet_byte_count == 0:
             self._dbg("\tSKIPPING NO PACKETS AVAILABLE IN bno08x_i2c._read_packet")
             raise PacketError("No packet available")
 
         #Then we read the packet data to the buffer image
-        self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:packet_byte_count])
+        self._i2c.readfrom_into(self._bno_add, self._buffer_mv[0:packet_byte_count])
 
         #Then process the packet 
-        new_packet = Packet(self._data_buffer[0:packet_byte_count])
-        
+        new_packet = Packet(self._buffer[0:packet_byte_count])
         if self._debug:
             print(new_packet)
-
         self._update_sequence_number(new_packet)
-
         return new_packet
     
     def _read_header(self):
@@ -1204,21 +1211,31 @@ class BNO08X:
         self._dbg("READING HEADER...")
         
         #Reads the first 4 bytes available as a header ==> Expecting a header
-        self._i2c.readfrom_into(self._bno_add, self._data_buffer_mv[0:4])
-        packet_header = Packet.header_from_buffer(self._data_buffer[0:4])
-        header = Header(self._data_buffer[0:4])
+        self._i2c.readfrom_into(self._bno_add, self._buffer_mv[0:4])
+        packet_header = Packet.header_from_buffer(self._buffer[0:4])
+        header = Header(self._buffer[0:4])
         
         if self._debug:
             print(header)
         
         return packet_header
+    
+    def _insert_cde_request_report(self, command, buffer, next_sequence_number, command_params=None):
+        if command_params and len(command_params) > 9:
+            raise AttributeError(
+                "Command request reports can only have up to 9 arguments but %d were given"
+                % len(command_params)
+            )
+        for _i in range(12):
+            buffer[_i] = 0
+        buffer[0] = COMMAND_REQUEST
+        buffer[1] = next_sequence_number
+        buffer[2] = command
+        if command_params is None:
+            return
 
-    def _increment_report_seq(self, report_id):
-        current = self._two_ended_sequence_numbers.get(report_id, 0)
-        self._two_ended_sequence_numbers[report_id] = (current + 1) % 256
-
-    def _get_report_seq_id(self, report_id):
-        return self._two_ended_sequence_numbers.get(report_id, 0)
+        for idx, param in enumerate(command_params):
+            buffer[3 + idx] = param
   
     def _dbg(self, *args, **kwargs):
         if self._debug:
