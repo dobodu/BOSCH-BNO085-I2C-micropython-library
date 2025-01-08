@@ -16,7 +16,7 @@ from math import asin, atan2, degrees
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 LIBNAME = "BNO08X"
-LIBVERSION = "1.0.5"
+LIBVERSION = "1.0.6"
 
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
@@ -69,6 +69,46 @@ ME_CALIBRATION_CONFIG_SUBCDE = 0x00
 ME_CALIBRATION_GETCAL_SUBCDE = 0x01
 ME_SAVE_DCD_PERIODIC_ENABLE_SUBCDE = 0x00
 ME_SAVE_DCD_PERIODIC_DISABLE_SUBCDE = 0x00
+
+
+#BNO CONFIGURATION RECORDS
+BNO_CONF_STATIC_CALIBRATION_AGM = 0x7979
+BNO_CONF_NOMINAL_CALIBRATION_AGM = 0x4D4D
+BNO_CONF_STATIC_CALIBRATION_SRA = 0x8A8A
+BNO_CONF_NOMINAL_CALIBRATION_SRA = 0x4E4E
+BNO_CONF_DYNAMIC_CALIBRATION = 0x1F1F
+BNO_CONF_MOTION_ENGINE_POWER_MANAGEMENT = 0xD3E2
+BNO_CONF_SYSTEM_ORIENTATION = 0x2D3E
+BNO_CONF_PRIMARY_ACCELEROMETER_ORIENTATION = 0x2D41
+BNO_CONF_SCREEN_ROTATION_ACCELEROMETER_ORIENTATION = 0x2D43
+BNO_CONF_GYROSCOPE_ORIENTATION = 0x2D46
+BNO_CONF_MAGNETOMETER_ORIENTATION = 0x2D4C
+BNO_CONF_ARVR_STABILIZATION_ROTATION_VECTOR = 0x3E2D
+BNO_CONF_ARVR_STABILIZATION_GAME_ROTATION_VECTOR = 0x3E2E
+BNO_CONF_SIGNIFICANT_MOTION_DETECTOR = 0xC274
+BNO_CONF_SHAKE_DETECTOR = 0x7D7D
+BNO_CONF_MAXIMUM_FUSION_PERIOD = 0xD7D7
+BNO_CONF_SERIAL_NUMBER = 0x4B4B
+BNO_CONF_ENV_SENSOR_PRESSURE_CALIBRATION = 0x39AF
+BNO_CONF_ENV_SENSOR_TEMPERATURE_CALIBRATION = 0x4D20
+BNO_CONF_ENV_SENSOR_HUMIDITY_CALIBRATION = 0x1AC9
+BNO_CONF_ENV_SENSOR_AMBIENT_LIGHT_CALIBRATION = 0x39B1
+BNO_CONF_ENV_SENSOR_PROXIMITY_CALIBRATION = 0x4DA2
+BNO_CONF_ALS_CALIBRATION = 0xD401
+BNO_CONF_PROXIMITY_SENSOR_CALIBRATION = 0xD402
+BNO_CONF_PICKUP_DETECTOR = 0x1B2A
+BNO_CONF_FLIP_DETECTOR = 0xFC94
+BNO_CONF_STABILITY_DETECTOR = 0xED85
+BNO_CONF_ACTIVITY_TRACKER = 0xED88
+BNO_CONF_SLEEP_DETECTOR = 0xED87
+BNO_CONF_TILT_DETECTOR = 0xED89
+BNO_CONF_POCKET_DETECTOR = 0xEF27
+BNO_CONF_CIRCLE_DETECTOR = 0xEE51
+BNO_CONF_USER_RECORD = 0x74B4
+BNO_CONF_MOTION_ENGINE_TIME_SOURCE_SELECTION = 0xD403
+BNO_CONF_UART_OUTPUT_FORMAT_SELECTION = 0xA1A1
+BNO_CONF_GYRO_INTEGRATED_ROTATION_VECTOR = 0xA1A2
+BNO_CONF_FUSION_CONTROL_FLAGS = 0xA1A3
 
 #Reports Summary depending on BNO device 
 BNO_REPORT_ACCELEROMETER = 0x01
@@ -280,7 +320,7 @@ REPORTS_DICTIONARY = {
     0xF1: "COMMAND_RESPONSE",
     0xF2: "COMMAND_REQUEST",
     0xF3: "FRS_READ_RESPONSE",
-    0xF4: "FRS_READ_REQUEST",
+    0xF4: "",
     0xF5: "FRS_WRITE_RESPONSE",
     0xF6: "FRS_WRITE_DATA",
     0xF7: "FRS_WRITE_REQUEST",
@@ -591,6 +631,42 @@ class BNO08X:
                 return
         raise RuntimeError("BNO08X_I2C : ENABLING FEATURE ID : Was not able to enable feature", feature_id)
 
+
+    def set_orientation(self, quaternion):
+        return #Procedure to be completed and corrected
+        #set orientation of the system
+        self._dbg("DEVICE ORIENTATION SETTING UP...")
+        set_orientation = bytearray(17)
+        set_orientation[0] = FRS_WRITE_REQUEST
+        set_orientation[1] = 0,  # reserved
+        set_orientation[2] = 0,  # Length LSB
+        set_orientation[3] = BNO_CONF_SYSTEM_ORIENTATION & 0xFF,  # FRS Type LSB
+        set_orientation[4] = BNO_CONF_SYSTEM_ORIENTATION >> 80,  # FRS Type MSB
+        
+        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
+        
+        set_orientation[0] = FRS_WRITE_DATA
+        set_orientation[1] = 0,  # reserved
+        set_orientation[2] = 0,  # Offset LSB
+        set_orientation[3] = 0,  # Offset MSB
+        set_orientation[4] = ORENT_QW & 0xFF, # Data0 LSB
+        set_orientation[5] = ORENT_QW >> 8, # Data0 MSB
+        set_orientation[6] = 0,  # Offset LSB
+        set_orientation[7] = 0,  # Offset MSB
+        set_orientation[8] = ORENT_QX & 0xFF, # Data1 LSB
+        set_orientation[9] = ORENT_QX >> 8, # Data1 MSB
+        set_orientation[10] = 0,  # Offset LSB
+        set_orientation[11] = 0,  # Offset MSB
+        set_orientation[12] = ORENT_QY & 0xFF, # Data2 LSB
+        set_orientation[13] = ORENT_QY >> 8, # Data2 MSB
+        set_orientation[14] = 0,  # Offset LSB
+        set_orientation[15] = 0,  # Offset MSB
+        set_orientation[16] = ORENT_QZ & 0xFF, # Data2 LSB
+        set_orientation[17] = ORENT_QZ >> 8, # Data2 MSB
+
+        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
+        
+
     def set_quaternion_euler_vector(self, feature_id):
         self._quaternion_euler_vector = feature_id
         return
@@ -653,7 +729,7 @@ class BNO08X:
     @property
     def mag(self):
         #A tuple of the current magnetic field measurements on the X, Y, and Z axes
-        self._process_available_packets()  # decorator?
+        self._process_available_packets()
         try:
             return self._readings[BNO_REPORT_MAGNETOMETER]
         except KeyError:
@@ -1089,7 +1165,7 @@ class BNO08X:
             raw_data = unpack_from(format_str, report_bytes, total_offset)[0]
             scaled_data = raw_data * scalar
             results.append(scaled_data)
-        sensor_data = tuple(results)
+        sensor_data = tuple(results)       
         if self._debug:
             outstr = "\t\t\t\tReading for %s %s Accuracy %d" % (REPORTS_DICTIONARY[report_id], str(sensor_data), accuracy)
             print(outstr)
