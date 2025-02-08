@@ -16,7 +16,7 @@ from math import asin, atan2, degrees
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 LIBNAME = "BNO08X"
-LIBVERSION = "1.0.6"
+LIBVERSION = "1.0.7"
 
 #BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
@@ -1127,7 +1127,7 @@ class BNO08X:
             return
 
         if report_id == BNO_REPORT_STABILITY_CLASSIFIER:
-            classification_bitfield = unpack_from("<B", report_bytes, 4)
+            classification_bitfield = unpack_from("<B", report_bytes, 4)[0]
             stability_classification = ["Unknown", "On Table", "Stationary", "Stable", "In motion"][classification_bitfield]
             self._readings[BNO_REPORT_STABILITY_CLASSIFIER] = stability_classification
             return
