@@ -30,7 +30,7 @@ Need an I2C setup like
 
 but can be completed by optinal conditions
 
-    bno = BNO08X_I2C(i2c_bus, address=None, reset_pin=None, debug=False)
+    bno = BNO08X_I2C(i2c_bus, address=None, rst_pin=None, debug=False)
 
 **Mandatory :**
 
@@ -39,7 +39,7 @@ but can be completed by optinal conditions
 **Optionnal :**
 
 - address : will try to find by itself, but if using 2 BNO08x you need to define it
-- reset_pin : if a pin identifier is defined, will try to hard reset, otherwise, soft reset only
+- rst_pin : if a pin identifier (Pin Nb, not Pin object) is defined, will try to hard reset, otherwise, soft reset only
 - debug : just in case...  
 
 **Implentation of sensors is done throught**
