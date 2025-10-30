@@ -40,9 +40,9 @@ but can be completed by optinal conditions
 
 **Optional :**
 
-- address : will try to find by itself, but if using 2 BNO08x you need to define it
-- rst_pin : if a pin identifier (Pin Nb, not Pin object) is defined, will try to hard reset, otherwise, soft reset only
-- debug : just in case...  
+- address : will find by itself, but if using 2 BNO08x you need to define it
+- rst_pin : if a pin identifier (Pin #, not Pin object) is defined, will try to hard reset, otherwise, soft reset will be used
+- debug : print logs from driver 
 
 **Enable the sensor reports**
 
@@ -95,42 +95,40 @@ Sensors values can be reached with
 
     accel_x, accel_y, accel_z = bno.acc
 
-Roll Tilt and Pancan be obtained with
+Roll Tilt and Pan can be obtained with
 
     roll, tilt, pan = bno.euler
 
 **Examples of other sensor reports**
 
-See examples directory for working code examples. The following functions have on-chip sensor fusion for accuracy.
+See examples directory for code examples. The following functions use on-chip sensor fusion for accuracy.
 
     x, y, z = bno.acc  # acceleration 3-tuple of x,y,z float returned
     x, y, z = bno.acc_linear  # linear accel 3-tuple of x,y,z float returned
     x, y, z = bno.gyro  # acceleration 3-tuple of x,y,z float returned
     x, y, z = bno.mag  # acceleration 3-tuple of x,y,z float returned
-    x, y, z = bno.euler  # rotation 3-tuple of x,y,z float returned
+    roll, pitch, yaw = bno.euler  # rotation 3-tuple of x,y,z float returned
     x, y, z = bno.gravity  # vector 3-tuple of x,y,z float returned
     i, j, k, real = bno.quaternion  # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.geomagnetic_quat  # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.game_quat  # rotation 4-tuple of i,j,k,real float returned
-    num = bno.steps  # number of steps since sensor initialization returned
+    num = bno.steps  # number of steps since last inquiry or initialization returned
     state = bno.shaken  # boolean of state since last read returned
     stability_str = bno.stability_classif  # string of stability classification returned
     activity_str = bno.activity_classif  # string of activity classification returned
 
 The following functions provide raw values directly from individual sensors:
 
-    # raw data accel tuple of x,y,z, float and time_stamp int returned
-    x, y, z, us = bno.acc_raw 
-    x, y, z, us = bno.mag_raw
+    # raw data sensor tuple of x,y,z, float and time_stamp int returned
+    x, y, z, usec = bno.acc_raw 
+    x, y, z, usec = bno.mag_raw
     
-    # raw data accel tuple of x,y,z, celsius float and time_stamp int returned
-    x, y, z, temp_c, us = bno.gyro_raw
+    # raw data gyro tuple of x,y,z, celsius float, and time_stamp int returned
+    x, y, z, temp_c, usec = bno.gyro_raw
     
 The following functions can be used to control and test sensor:
 
     bno.tare  # tare the sensor
     bno.calibration  # self calibrate the sensor
     mag_accuracy = bno.calibration_status  # return mag calibration status int
-    status = bno.ready # test sensor status, boolean returned
-    print(f"{status=}")
-
+    status = bno.ready  # test sensor status, boolean returned
