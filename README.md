@@ -8,21 +8,23 @@
 
 |  Manufacturer |  Chips  |  Observations |
 | ------------ | ------------ | ------------ | 
-|  Raspberry | Pico, Pico W,  Pico 2,  Pico 2W   |   |
+|  Raspberry | Pico, Pico W,  Pico 2,  Pico 2 W   |   |
 |  Espressif | Esp32 S2, Esp32 S3 |  See Requirements |
+
+This library has been tested with BNO085 and BNO086 sensors.
 
 ESP32 S3 need a firmware compiled with ESP-IDF 5.3.2 (maybe 5.3.1 will also work)
 [Firmware for Lilygo AMOLED displays](https://github.com/dobodu/Lilygo-Amoled-Micropython/blob/main/firmware/firmware_2024_12_28.bin "Firmware for Lilygo AMOLED displays")
 
 ## How to setup
 
-Need an I2C setup like
+Need to set up the I2C
 
-        #import the library
+    #import the library
     import bno08x
 
     #setup the  I2C bus
-    i2c0 = I2C(0, scl=I2C1_SCL, sda=I2C1_SDA, freq=100000, timeout=200000 )
+    i2c0 = I2C(0, scl=I2C0_SCL, sda=I2C0_SDA, freq=100000, timeout=200000)
 
     #setup the BNO sensor
     bno = BNO08x(i2c0)
@@ -36,13 +38,13 @@ but can be completed by optinal conditions
 
 - i2c_bus
 
-**Optionnal :**
+**Optional :**
 
 - address : will try to find by itself, but if using 2 BNO08x you need to define it
 - rst_pin : if a pin identifier (Pin Nb, not Pin object) is defined, will try to hard reset, otherwise, soft reset only
 - debug : just in case...  
 
-**Implentation of sensors is done throught**
+**Implentation of sensors is done through**
 
     bno.enable_feature(BNO_REPORT_ACCELEROMETER)  # for accelerometer
     
@@ -96,3 +98,8 @@ Sensors values can be reached with
 Roll Tilt and Pancan be obtained with
 
     roll, tilt, pan = bno.euler
+
+Examples of other sensor reports
+
+Examples of other sensor functions
+* boolean bno.ready
