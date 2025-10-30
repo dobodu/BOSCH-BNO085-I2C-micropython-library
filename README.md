@@ -129,6 +129,9 @@ The following functions provide raw values directly from individual sensors:
 The following functions can be used to control and test sensor:
 
     bno.tare  # tare the sensor
-    bno.calibration  # self calibrate the sensor
+
     mag_accuracy = bno.calibration_status  # return mag calibration status int
+    print(f"Mag Calibration: {REPORT_ACCURACY_STATUS[mag_status]}={mag_status}")
+
+    bno.calibration  # self calibrate the sensor
     status = bno.ready  # test sensor status, boolean returned
