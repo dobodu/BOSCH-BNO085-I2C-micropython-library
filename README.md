@@ -29,10 +29,9 @@ Need to set up the I2C
     #setup the BNO sensor
     bno = BNO08x(i2c0)
 
+but can be completed by optional conditions
 
-but can be completed by optinal conditions
-
-    bno = BNO08X_I2C(i2c_bus, address=None, rst_pin=None, debug=False)
+    bno = BNO08X_I2C(i2c_bus, address=None, rst_pin=14, debug=False)
 
 **Mandatory :**
 
@@ -41,7 +40,7 @@ but can be completed by optinal conditions
 **Optional :**
 
 - address : will find by itself, but if using 2 BNO08x you need to define it
-- rst_pin : if a pin identifier (Pin #, not Pin object) is defined, will try to hard reset, otherwise, soft reset will be used
+- rst_pin : if a pin identifier (Pin number, not Pin object) is defined, will do a hard reset, otherwise, soft reset will be used
 - debug : print logs from driver 
 
 **Enable the sensor reports**
@@ -101,7 +100,7 @@ Roll Tilt and Pan can be obtained with
 
 **Examples of other sensor reports**
 
-See examples directory for code examples. The following functions use on-chip sensor fusion for accuracy.
+See examples directory for sample code. The following functions use on-chip sensor fusion for accuracy.
 
     x, y, z = bno.acc  # acceleration 3-tuple of x,y,z float returned
     x, y, z = bno.acc_linear  # linear accel 3-tuple of x,y,z float returned
