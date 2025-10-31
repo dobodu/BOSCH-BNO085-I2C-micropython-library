@@ -11,7 +11,7 @@
 |  Raspberry | Pico, Pico W,  Pico 2,  Pico 2 W   |   |
 |  Espressif | Esp32 S2, Esp32 S3 |  See Requirements |
 
-This library has been tested with BNO085 and BNO086 sensors.
+This library has been tested with BNO080, BNO085, and BNO086 sensors.
 
 ESP32 S3 need a firmware compiled with ESP-IDF 5.3.2 (maybe 5.3.1 will also work)
 [Firmware for Lilygo AMOLED displays](https://github.com/dobodu/Lilygo-Amoled-Micropython/blob/main/firmware/firmware_2024_12_28.bin "Firmware for Lilygo AMOLED displays")
@@ -111,7 +111,7 @@ See examples directory for sample code. The following functions use on-chip sens
     i, j, k, real = bno.quaternion  # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.geomagnetic_quat  # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.game_quat  # rotation 4-tuple of i,j,k,real float returned
-    num = bno.steps  # number of steps since last inquiry or initialization returned
+    num = bno.steps  # number of steps since initialization returned
     state = bno.shaken  # boolean of state since last read returned
     stability_str = bno.stability_classif  # string of stability classification returned
     activity_str = bno.activity_classif  # string of activity classification returned
