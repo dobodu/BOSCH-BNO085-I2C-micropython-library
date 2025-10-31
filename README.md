@@ -130,8 +130,9 @@ The following functions can be used to control and test sensor:
 
     bno.tare  # tare the sensor
 
-    mag_accuracy = bno.calibration_status  # return mag calibration status int
-    print(f"Mag Calibration: {REPORT_ACCURACY_STATUS[mag_status]}={mag_status}")
+    bno.calibration  # begin calibration
+    mag_accuracy = bno.calibration_status  # magnetic calibration status int returned
+    print(f"Mag Calibration: {REPORT_ACCURACY_STATUS[mag_accuracy]} = {mag_accuracy}")
+    bno.calibration_save  # Save calibration
 
-    bno.calibration  # self calibrate the sensor
     status = bno.ready  # test sensor status, boolean returned
