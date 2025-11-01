@@ -8,41 +8,42 @@
 
 |  Manufacturer |  Chips  |  Observations |
 | ------------ | ------------ | ------------ | 
-|  Raspberry | Pico, Pico W,  Pico 2,  Pico 2W   |   |
+|  Raspberry | Pico, Pico W,  Pico 2,  Pico 2 W   |   |
 |  Espressif | Esp32 S2, Esp32 S3 |  See Requirements |
+
+This library has been tested with BNO080, BNO085, and BNO086 sensors.
 
 ESP32 S3 need a firmware compiled with ESP-IDF 5.3.2 (maybe 5.3.1 will also work)
 [Firmware for Lilygo AMOLED displays](https://github.com/dobodu/Lilygo-Amoled-Micropython/blob/main/firmware/firmware_2024_12_28.bin "Firmware for Lilygo AMOLED displays")
 
 ## How to setup
 
-Need an I2C setup like
+Need to set up the I2C
 
-        #import the library
+    #import the library
     import bno08x
 
     #setup the  I2C bus
-    i2c0 = I2C(0, scl=I2C1_SCL, sda=I2C1_SDA, freq=100000, timeout=200000 )
+    i2c0 = I2C(0, scl=I2C0_SCL, sda=I2C0_SDA, freq=100000, timeout=200000)
 
     #setup the BNO sensor
     bno = BNO08x(i2c0)
 
+but can be completed by optional conditions
 
-but can be completed by optinal conditions
-
-    bno = BNO08X_I2C(i2c_bus, address=None, rst_pin=None, debug=False)
+    bno = BNO08X_I2C(i2c_bus, address=None, rst_pin=14, debug=False)
 
 **Mandatory :**
 
 - i2c_bus
 
-**Optionnal :**
+**Optional :**
 
-- address : will try to find by itself, but if using 2 BNO08x you need to define it
-- rst_pin : if a pin identifier (Pin Nb, not Pin object) is defined, will try to hard reset, otherwise, soft reset only
-- debug : just in case...  
+- address : will find by itself, but if using 2 BNO08x you need to define it
+- rst_pin : if a pin identifier (Pin number, not Pin object) is defined, will do a hard reset, otherwise, soft reset will be used
+- debug : print logs from driver 
 
-**Implentation of sensors is done throught**
+**Enable the sensor reports**
 
     bno.enable_feature(BNO_REPORT_ACCELEROMETER)  # for accelerometer
     
@@ -93,6 +94,44 @@ Sensors values can be reached with
 
     accel_x, accel_y, accel_z = bno.acc
 
-Roll Tilt and Pancan be obtained with
+Roll Tilt and Pan can be obtained with
 
     roll, tilt, pan = bno.euler
+
+**Examples of other sensor reports**
+
+See examples directory for sample code. The following functions use on-chip sensor fusion for accuracy.
+
+    x, y, z = bno.acc  # acceleration 3-tuple of x,y,z float returned
+    x, y, z = bno.acc_linear  # linear accel 3-tuple of x,y,z float returned
+    x, y, z = bno.gyro  # acceleration 3-tuple of x,y,z float returned
+    x, y, z = bno.mag  # acceleration 3-tuple of x,y,z float returned
+    roll, pitch, yaw = bno.euler  # rotation 3-tuple of x,y,z float returned
+    x, y, z = bno.gravity  # vector 3-tuple of x,y,z float returned
+    i, j, k, real = bno.quaternion  # rotation 4-tuple of i,j,k,real float returned
+    i, j, k, real = bno.geomagnetic_quat  # rotation 4-tuple of i,j,k,real float returned
+    i, j, k, real = bno.game_quat  # rotation 4-tuple of i,j,k,real float returned
+    num = bno.steps  # number of steps since initialization returned
+    state = bno.shaken  # boolean of state since last read returned
+    stability_str = bno.stability_classif  # string of stability classification returned
+    activity_str = bno.activity_classif  # string of activity classification returned
+
+The following functions provide raw values directly from individual sensors:
+
+    # raw data sensor tuple of x,y,z, float and time_stamp int returned
+    x, y, z, usec = bno.acc_raw 
+    x, y, z, usec = bno.mag_raw
+    
+    # raw data gyro tuple of x,y,z, celsius float, and time_stamp int returned
+    x, y, z, temp_c, usec = bno.gyro_raw
+    
+The following functions can be used to control and test sensor:
+
+    bno.tare  # tare the sensor
+
+    bno.calibration  # begin calibration
+    mag_accuracy = bno.calibration_status  # magnetic calibration status int returned
+    print(f"Mag Calibration: {REPORT_ACCURACY_STATUS[mag_accuracy]} = {mag_accuracy}")
+    bno.calibration_save  # Save calibration
+
+    status = bno.ready  # test sensor status, boolean returned
