@@ -1,26 +1,28 @@
 # BNO08X Micropython I2C Library by Dobodu
 #
-# Adapted from original Adafruit CircuitPython library
+# Adapted from original Adafruit CircuitPyhton library
 # SPDX-FileCopyrightText: Copyright (c) 2020 Bryan Siepert for Adafruit Industries
 # SPDX-License-Identifier: MIT
 #
-# Working for BNO080 / BNO085 / BNO086 (Bosch 9 axis sensors with HillCrest Labs)
-# implemented Raw ACCEL, MAG, GYRO
+# Working for BNO080 / BNO085 / BNO086 (Bosch 9-axis sensors with HillCrest Labs)
+# implemented Raw Acceleration, Raw Magnetic, and Raw Gyro
+# tested Calibration using examples/calibration.py
+# fixed shake detection, activity classif, stability classif, step counter
 #
 # TODO : (From original Library)
-#
+# question: should activity_classif be activity_classification like the original drivers?
+# question: also stability classif, since they were not working maybe no user impact.
 # Calibrated Acceleration (m/s2)
-# Calibration
 
-
-from collections import namedtuple
 from math import asin, atan2, degrees
 
+from collections import namedtuple
+from micropython import const
 from ustruct import unpack_from, pack_into
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 LIBNAME = "BNO08X"
-LIBVERSION = "1.0.9"
+LIBVERSION = "1.0.8"
 
 # BNO08X SETUP
 BNO08X_DEFAULT_ADDRESS = (0x4A, 0x4B)
@@ -207,7 +209,6 @@ REPORT_LENGTHS = {
     SHTP_REPORT_ID_RESPONSE: 16,
     GET_FEATURE_RESPONSE: 17,
     COMMAND_RESPONSE: 16,
-    SHTP_REPORT_ID_RESPONSE: 16,
     BASE_TIMESTAMP: 5,
     REBASE_TIMESTAMP: 5,
 }
@@ -269,11 +270,12 @@ INITIAL_REPORTS = {
     BNO_REPORT_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
     BNO_REPORT_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
-    # Gyro is a 5 tuple, int timestamp for last entry
-    BNO_REPORT_RAW_GYROSCOPE: (0.0, 0.0, 0.0, 0.0, 0),
+    # Gyro is a 5 tuple, celsius float and int timestamp for last two entry
+    BNO_REPORT_RAW_GYROSCOPE: (0, 0, 0, 0.0, 0),
     # Acc & Mag are 4-tuple, int timestamp for last entry
-    BNO_REPORT_RAW_ACCELEROMETER: (0.0, 0.0, 0.0, 0),
-    BNO_REPORT_RAW_MAGNETOMETER: (0.0, 0.0, 0.0, 0),
+    BNO_REPORT_RAW_ACCELEROMETER: (0, 0, 0, 0),
+    BNO_REPORT_RAW_MAGNETOMETER: (0, 0, 0, 0),
+    BNO_REPORT_STEP_COUNTER: 0,
 }
 
 # Dictionaries for debugging
@@ -340,7 +342,7 @@ REPORTS_DICTIONARY = {
     0xFE: "GET_FEATURE_REQUEST",
 }
 
-ACTITITIES = ["Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still",
+ACTIVITIES = ["Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still",
               "Tilting", "Walking", "Running", "OnStairs"]
 
 ENABLED_ACTIVITIES = (
@@ -407,7 +409,7 @@ class Packet:
     def __str__(self):
         length = self.header.packet_byte_count
         outstr = "\t\t\t\tPacket Header:\n"
-        outstr += "\t\t\t\t\tData Len:\t\t%d\n" % (self.header.data_length)
+        outstr += "\t\t\t\t\tData Len:\t\t%d\n" % self.header.data_length
         outstr += "\t\t\t\t\tChan Num:\t\t%d (%s)\n" % (
             self.channel_number,
             CHANNELS_DICTIONARY[self.channel_number],
@@ -504,7 +506,7 @@ class BNO08X:
         self._rst_pin = rst_pin
         self._ready = False
 
-        # Searching for BNO08x adresses on I2C bus if not specifyed
+        # Searching for BNO08x addresses on I2C bus if not specified
         if address is None:
             devices = set(self._i2c.scan())
             mpus = devices.intersection(set(BNO08X_DEFAULT_ADDRESS))
@@ -513,7 +515,7 @@ class BNO08X:
                 raise ValueError("No BNO08x detected")
             elif nb_of_mpus == 1:
                 self._bno_add = mpus.pop()
-                self._dbg("BNO08x found at adress", hex(self._bno_add))
+                self._dbg("BNO08x found at address", hex(self._bno_add))
                 self._ready = True
             else:
                 raise ValueError("Two BNO08x detected: must specify a device address")
@@ -730,7 +732,7 @@ class BNO08X:
     @property
     def gyro_raw(self):
         # Returns the sensor's raw, unscaled value from the gyro registers
-        # gyro_raw returns 5 values: x, y, z, celsius, and time_stamp
+        # gyro_raw returns 5 values: x, y, z, Celsius, and time_stamp
         self._process_available_packets()
         try:
             raw_gyro = self._readings[BNO_REPORT_RAW_GYROSCOPE]
@@ -770,7 +772,7 @@ class BNO08X:
 
     @property
     def euler(self):
-        # A 3-tupple representing the current Pan Tilt and Roll euler angle in degree
+        # A 3-tuple representing the current Pan Tilt and Roll euler angle in degree
         self._process_available_packets()
         try:
             # q = self._readings[BNO_REPORT_ROTATION_VECTOR]
@@ -781,18 +783,18 @@ class BNO08X:
         jsqr = q[1] * q[1]
         t0 = +2.0 * (q[3] * q[0] + q[1] * q[2])
         t1 = +1.0 - 2.0 * (q[0] * q[0] + jsqr)
-        Roll = degrees(atan2(t0, t1))
+        roll = degrees(atan2(t0, t1))
 
         t2 = +2.0 * (q[3] * q[1] - q[2] * q[0])
         t2 = +1.0 if t2 > +1.0 else t2
         t2 = -1.0 if t2 < -1.0 else t2
-        Tilt = degrees(asin(t2))
+        tilt = degrees(asin(t2))
 
         t3 = +2.0 * (q[3] * q[2] + q[0] * q[1])
         t4 = +1.0 - 2.0 * (jsqr + q[2] * q[2])
-        Pan = degrees(atan2(t3, t4))
+        pan = degrees(atan2(t3, t4))
 
-        return (Roll, Tilt, Pan)
+        return roll, tilt, pan
 
     @property
     def geomagnetic_quat(self):
@@ -857,7 +859,7 @@ class BNO08X:
 
     @property
     def stability_classif(self):
-        """Returns the sensor's assessment of it's current stability, one of:
+        """Returns the sensor's assessment of its current stability, one of:
         * "Unknown" - The sensor is unable to classify the current stability
         * "On Table" - The sensor is at rest on a stable surface with very little vibration
         * "Stationary" -  The sensor’s motion is below the stable threshold but\
@@ -912,7 +914,7 @@ class BNO08X:
         self._calibration_complete = True
 
     def calibration(self):
-        # Self-calibrate the sensor
+        # start calibration for accel, gyro, and mag
         self._dbg("MOTION ENGINE CALIBRATION BEING DONE...")
         self._send_ME_cde(ME_CALIBRATION_CDE,
                           [
@@ -931,7 +933,7 @@ class BNO08X:
 
     @property
     def calibration_status(self):
-        # Get the status of the self-calibration
+        # Get the magnetic accuracy of the self-calibration
         self._dbg("MOTION ENGINE GETTING CALIBRATION STATUS...")
         self._send_ME_cde(ME_CALIBRATION_CDE,
                           [
@@ -1125,23 +1127,25 @@ class BNO08X:
             print(outstr)
 
         if report_id == BNO_REPORT_STEP_COUNTER:
-            self._readings[report_id] = unpack_from("<H", report_bytes, 8)
+            # fixed typo
+            self._readings[report_id] = unpack_from("<H", report_bytes, 8)[0]
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
-            shake_bitfield = unpack_from("<H", report_bytes, 4)
-            shake_detected = (shake_bitfield & 0x111) > 0
+            # Fixed: 16-bit shake bitfield, Mask for X, Y, Z axes (0x01 | 0x02 | 0x04 = 0x07)
+            shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
+            shake_detected = (shake_bitfield & 0x07) != 0
 
-            # shake not previously detected - auto cleared by 'shake' property
-            try:
-                if not self._readings[BNO_REPORT_SHAKE_DETECTOR]:
-                    self._readings[BNO_REPORT_SHAKE_DETECTOR] = shake_detected
-            except KeyError:
-                pass
+            # Latch shake in _readings
+            if shake_detected:
+                previous = self._readings.get(BNO_REPORT_SHAKE_DETECTOR, False)
+                self._readings[BNO_REPORT_SHAKE_DETECTOR] = True
+
             return
 
         if report_id == BNO_REPORT_STABILITY_CLASSIFIER:
-            classification_bitfield = unpack_from("<B", report_bytes, 4)
+            # fixed typo
+            classification_bitfield = unpack_from("<B", report_bytes, 4)[0]
             stability_classification = ["Unknown", "On Table", "Stationary", "Stable", "In motion"][
                 classification_bitfield]
             self._readings[BNO_REPORT_STABILITY_CLASSIFIER] = stability_classification
@@ -1154,30 +1158,29 @@ class BNO08X:
             # last_page = (end_and_page_number & 0b10000000) > 0
             page_number = end_and_page_number & 0x7F
             confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
-            activity_classification = {}
-            activity_classification["most_likely"] = ACTITITIES[most_likely]
+            activity_classification = {"most_likely": ACTIVITIES[most_likely]}
             for idx, raw_confidence in enumerate(confidences):
                 confidence = (10 * page_number) + raw_confidence
-                activity_string = ACTITITIES[idx]
+                activity_string = ACTIVITIES[idx]
                 activity_classification[activity_string] = confidence
             self._readings[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
 
         # Raw accelerometer: returns 4-tuple: x, y, z, and time_stamp
-        # time_stamp integer units in microseconds
+        # time_stamp units in microseconds
         if report_id == BNO_REPORT_RAW_ACCELEROMETER:
             data_offset = 4
             report_id = report_bytes[0]
             scalar, count, _report_length = AVAIL_SENSOR_REPORTS[report_id]
 
             results = []
-            # get 3 raw accelerometer x,y,z values
+            # get 3 raw accelerometer x,y,z 16-bit values
             for _offset_idx in range(count):
                 total_offset = data_offset + (_offset_idx * 2)
                 raw_data = unpack_from("<H", report_bytes, total_offset)[0]
                 results.append(raw_data)
 
-            # get time_stamp from raw accelerometer
+            # get 32-bit time_stamp from raw accelerometer, time_stamp units in microseconds
             time_stamp = unpack_from("<I", report_bytes, 12)[0]
             results.append(time_stamp)
 
@@ -1195,7 +1198,7 @@ class BNO08X:
             return
 
         # Raw gyroscope: returns 5-tuple: x, y, z, celsius, and time_stamp
-        # time_stamp integer units in microseconds
+        # time_stamp units in microseconds
         # Celsius float units in celsius
         if report_id == BNO_REPORT_RAW_GYROSCOPE:
             data_offset = 4
@@ -1203,19 +1206,19 @@ class BNO08X:
             scalar, count, _report_length = AVAIL_SENSOR_REPORTS[report_id]
 
             results = []
-            # get 3 raw gyroscope x,y,z values
+            # get 3 raw gyroscope x,y,z 16-bit values
             for _offset_idx in range(count):
                 total_offset = data_offset + (_offset_idx * 2)
                 raw_data = unpack_from("<H", report_bytes, total_offset)[0]
                 results.append(raw_data)
 
             # get temperature from raw gyroscope
-            # Cera support: temp is signed int, 0.5C/LSB, center offset is 23°C
+            # Cera support: temp_int is signed 16-bit int, 0.5C/LSB, center offset is 23°C
             temp_int = unpack_from("<h", report_bytes, 10)[0]
             celsius = (temp_int / 2.0) + 23.0
             results.append(celsius)
 
-            # get time_stamp from raw gyroscope, time_stamp units in microseconds
+            # get 32-bit time_stamp from raw gyroscope, time_stamp units in microseconds
             time_stamp = unpack_from("<I", report_bytes, 12)[0]
             results.append(time_stamp)
 
@@ -1233,20 +1236,20 @@ class BNO08X:
             return
 
         # Raw Magnetometer: returns 4-tuple: x, y, z, and time_stamp
-        # time_stamp integer units in microseconds
+        # time_stamp units in microseconds
         if report_id == BNO_REPORT_RAW_MAGNETOMETER:
             data_offset = 4
             report_id = report_bytes[0]
             scalar, count, _report_length = AVAIL_SENSOR_REPORTS[report_id]
 
             results = []
-            # get 3 raw magnetometer x,y,z values
+            # get 3 raw magnetometer x,y,z 16-bit values
             for _offset_idx in range(count):
                 total_offset = data_offset + (_offset_idx * 2)
                 raw_data = unpack_from("<H", report_bytes, total_offset)[0]
                 results.append(raw_data)
 
-            # get time_stamp from raw magnetometer
+            # get 32-bit time_stamp from raw magnetometer, time_stamp units in microseconds
             time_stamp = unpack_from("<I", report_bytes, 12)[0]
             results.append(time_stamp)
 
@@ -1308,9 +1311,8 @@ class BNO08X:
             sensor_id = self._parse_sensor_id()
             if sensor_id:
                 self._id_read = True
-                return True
+                return True  # this is the only way to exit the while loop
             self._dbg("CHECKING ID : Packet didn't have sensor ID report, trying again")
-        return False
 
     def _parse_sensor_id(self):
         self._dbg("PARSE SENSOR ID : BUFFER DATA IS : ", self._buffer[4])
@@ -1370,8 +1372,8 @@ class BNO08X:
 
         # Header is 4 bytes long (2 bytes size, 1 byte for channel number and 1 byte for sequence number)
         # Buffer is declared in BNO08X class : self._buffer = bytearray(512)
-        # But here we use the memoryimage from this buffer which is declared in BNO08X class
-        # I2C adress is declared in class : self._bno_add
+        # But here we use the memory image from this buffer which is declared in BNO08X class
+        # I2C address is declared in class : self._bno_add
 
         # Begin with reading a header ==> Expecting a header (4 bytes)
         self._i2c.readfrom_into(self._bno_add, self._buffer_mv[0:4])
